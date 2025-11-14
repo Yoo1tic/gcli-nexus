@@ -1,0 +1,26 @@
+services:
+  gcli-nexus:
+    image: ghcr.io/Yoo1tic/gcli-nexus:latest
+    container_name: gcli-nexus
+    ports:
+      - "8000:8000"
+    environment:
+      # Required configuration
+      NEXUS_KEY: pwd
+
+      # Optional configuration
+      LOGLEVEL: info
+      DATABASE_URL: sqlite:///app/data/data.db
+      CRED_PATH: /app/credentials
+      BIGMODEL_LIST: "[gemini-2.5-pro]"
+      REFRESH_CONCURRENCY: 10
+      # PROXY: 
+    volumes:
+      # Persist SQLite database
+      - ./data:/app/data
+      # Optional: mount credentials directory
+      - ./credentials:/app/credentials:ro
+
+    # Restart policy
+    restart: unless-stopped
+

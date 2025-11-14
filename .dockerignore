@@ -1,0 +1,21 @@
+# Git
+.git
+.gitignore
+
+# Rust build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+credentials/
+
+# Documentation
+*.md
+LICENSE
+
+# CI/CD
+.github/
