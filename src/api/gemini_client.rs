@@ -40,9 +40,9 @@ struct CliPostFormatBody {
 impl GeminiClient {
     pub fn new(client: reqwest::Client) -> Self {
         let retry_policy = ExponentialBuilder::default()
-            .with_min_delay(Duration::from_millis(200))
-            .with_max_delay(Duration::from_millis(500))
-            .with_max_times(2);
+            .with_min_delay(Duration::from_millis(100))
+            .with_max_delay(Duration::from_secs(1))
+            .with_max_times(3);
         Self {
             client,
             retry_policy,
@@ -96,7 +96,7 @@ impl GeminiClient {
                     .await?;
                     if !resp.status().is_success() {
                         let status = resp.status();
-                        let bytes = resp.bytes().await.map_err(NexusError::Reqwest)?;
+                        let bytes = resp.bytes().await.map_err(NexusError::ReqwestError)?;
 
                         if let Ok(gemini_err) = serde_json::from_slice::<GeminiError>(&bytes) {
                             let http_code = gemini_err.error.code;
@@ -195,7 +195,7 @@ impl GeminiClient {
                     )
                 }
 
-                NexusError::Reqwest(_) => true,
+                NexusError::ReqwestError(_) => true,
                 _ => false,
             })
             .await

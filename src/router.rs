@@ -16,6 +16,7 @@ impl NexusState {
 
         let mut builder = reqwest::Client::builder()
             .user_agent(CLI_USER_AGENT.as_str())
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(15 * 60));
 

@@ -15,7 +15,7 @@ pub enum NexusError {
     UrlParse(#[from] url::ParseError),
 
     #[error("HTTP request error: {0}")]
-    Reqwest(#[from] reqwest::Error),
+    ReqwestError(#[from] reqwest::Error),
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
@@ -26,8 +26,8 @@ pub enum NexusError {
     #[error("missing email in userinfo response")]
     MissingEmailInUserinfo,
 
-    #[error("OAuth2 token request error: {0}")]
-    Oauth2Token(String),
+    #[error("Unexpected error: {0}")]
+    UnexpectedError(String),
 
     #[error("OAuth2 server error: {error}")]
     Oauth2Server { error: String },
@@ -49,30 +49,22 @@ pub enum NexusError {
 }
 
 impl NexusError {}
-
-impl
-    From<
-        RequestTokenError<
-            HttpClientError<ReqwestClientError>,
-            StandardErrorResponse<BasicErrorResponseType>,
-        >,
-    > for NexusError
-{
-    fn from(
-        e: RequestTokenError<
-            HttpClientError<ReqwestClientError>,
-            StandardErrorResponse<BasicErrorResponseType>,
-        >,
-    ) -> Self {
+type PkgsRequestTokenError = RequestTokenError<
+    HttpClientError<ReqwestClientError>,
+    StandardErrorResponse<BasicErrorResponseType>,
+>;
+impl From<PkgsRequestTokenError> for NexusError {
+    fn from(e: PkgsRequestTokenError) -> Self {
         match e {
             RequestTokenError::ServerResponse(err) => NexusError::Oauth2Server {
                 error: err.error().to_string(),
             },
-            RequestTokenError::Request(req_e) => {
-                NexusError::Oauth2Token(format!("request failed: {}", req_e))
-            }
+            RequestTokenError::Request(wrapper) => match wrapper {
+                oauth2::HttpClientError::Reqwest(real_err) => NexusError::ReqwestError(*real_err),
+                other => NexusError::UnexpectedError(format!("HttpClientError: {:?}", other)),
+            },
             RequestTokenError::Parse(parse_err, _body) => NexusError::Json(parse_err.into_inner()),
-            RequestTokenError::Other(s) => NexusError::Oauth2Token(s),
+            RequestTokenError::Other(s) => NexusError::UnexpectedError(s),
         }
     }
 }
@@ -98,7 +90,7 @@ impl IntoResponse for NexusError {
                 (status, body)
             }
             NexusError::Json(_)
-            | NexusError::Oauth2Token(_)
+            | NexusError::UnexpectedError(_)
             | NexusError::Oauth2Server { .. }
             | NexusError::MissingAccessToken
             | NexusError::MissingEmailInUserinfo => {
@@ -117,7 +109,7 @@ impl IntoResponse for NexusError {
                 };
                 (status, body)
             }
-            NexusError::Reqwest(_) | NexusError::UrlParse(_) => {
+            NexusError::ReqwestError(_) | NexusError::UrlParse(_) => {
                 let status = StatusCode::BAD_GATEWAY;
                 let body = ApiErrorBody {
                     code: "BAD_GATEWAY".to_string(),
@@ -197,5 +189,20 @@ impl GeminiError {
                 (diff_secs > 0).then_some(diff_secs as u64)
             })
             .next()
+    }
+}
+
+pub trait Retryable {
+    fn is_retryable(&self) -> bool;
+}
+
+impl Retryable for NexusError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            NexusError::ReqwestError(_) => true,
+            NexusError::UnexpectedError(_) => false,
+
+            _ => false,
+        }
     }
 }

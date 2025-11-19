@@ -126,7 +126,7 @@ pub static GOOGLE_USERINFO_URI: LazyLock<Url> = LazyLock::new(|| {
 // Access via CONFIG.database_url
 
 /// CLI/Proxy version and default User-Agent string. Built once globally.
-pub const CLI_VERSION: &str = "0.1.5";
+pub const CLI_VERSION: &str = "0.16.0";
 pub static CLI_USER_AGENT: LazyLock<String> =
     LazyLock::new(|| format!("GeminiCLI/{v} (Linux; x86_64)", v = CLI_VERSION));
 

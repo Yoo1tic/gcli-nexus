@@ -130,7 +130,7 @@ impl GoogleOauthService {
                 .retry(self.retry_policy)
                 .when(|e: &NexusError| match e {
                     // Do NOT retry on 401/403; retry on other reqwest errors
-                    NexusError::Reqwest(err) => !matches!(
+                    NexusError::ReqwestError(err) => !matches!(
                         err.status(),
                         Some(StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
                     ),
@@ -173,8 +173,8 @@ async fn refresh_inner(
             .retry(retry_policy)
             .when(|e: &NexusError| match e {
                 // reqwest::Error retryable
-                NexusError::Reqwest(_) => true,
-                NexusError::Oauth2Token(_) => true,
+                NexusError::ReqwestError(_) => true,
+                NexusError::UnexpectedError(_) => true,
                 // ServerResponse do not retry
                 NexusError::Oauth2Server { .. } => false,
                 // other errors do not retry
