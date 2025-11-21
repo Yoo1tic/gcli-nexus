@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT\n                id,\n                email,\n                project_id,\n                refresh_token,\n                access_token,\n                expiry as \"expiry!: DateTime<Utc>\",\n                status as \"status!: bool\"\n            FROM credentials\n            WHERE status = 1\n            ORDER BY id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "email",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "project_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "refresh_token",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "access_token",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "expiry!: DateTime<Utc>",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!: bool",
+        "ordinal": 6,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "7ad35b673c65af0f07c08bf43094ae5e03f02dc90a6ad5e2c58c743837228a86"
+}

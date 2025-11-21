@@ -3,18 +3,15 @@
 
 /// SQLite schema with:
 /// - `id` INTEGER PRIMARY KEY AUTOINCREMENT
-/// - All fields mirrored from `GoogleCredential`
+/// - Core fields mirrored from `GoogleCredential` (client keys are constants and not stored)
 /// - `project_id` UNIQUE (creates an index implicitly)
 /// - `status` BOOLEAN (stored as INTEGER 0/1)
 /// - Separate index on `project_id` kept for clarity/perf (redundant with UNIQUE)
 pub const SQLITE_INIT: &str = r#"
 CREATE TABLE IF NOT EXISTS credentials (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     email TEXT NULL,
-    client_id TEXT NOT NULL,
-    client_secret TEXT NOT NULL,
     project_id TEXT NOT NULL UNIQUE,
-    scopes TEXT NULL, -- JSON array, serialized as text
     refresh_token TEXT NOT NULL,
     access_token TEXT NULL,
     expiry TEXT NOT NULL, -- RFC3339

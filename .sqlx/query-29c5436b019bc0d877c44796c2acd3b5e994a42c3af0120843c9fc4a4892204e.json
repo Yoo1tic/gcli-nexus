@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO credentials (\n                email, project_id, refresh_token, access_token, expiry, status\n            ) \n            VALUES (?, ?, ?, ?, ?, ?)\n            ON CONFLICT(project_id) DO UPDATE SET\n                email=excluded.email,\n                refresh_token=excluded.refresh_token,\n                access_token=excluded.access_token,\n                expiry=excluded.expiry,\n                status=excluded.status\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "29c5436b019bc0d877c44796c2acd3b5e994a42c3af0120843c9fc4a4892204e"
+}

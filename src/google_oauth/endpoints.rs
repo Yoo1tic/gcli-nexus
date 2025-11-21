@@ -1,4 +1,4 @@
-use crate::config::{GOOGLE_AUTH_URL, GOOGLE_TOKEN_URI};
+use crate::config::{GCLI_CLIENT_ID, GCLI_CLIENT_SECRET, GOOGLE_AUTH_URL, GOOGLE_TOKEN_URI};
 use crate::error::NexusError;
 use crate::google_oauth::credentials::GoogleCredential;
 
@@ -22,7 +22,7 @@ impl GoogleOauthEndpoints {
         creds: &GoogleCredential,
         http_client: reqwest::Client,
     ) -> Result<GoogleTokenResponse, NexusError> {
-        let client = build_oauth2_client(creds)?;
+        let client = build_oauth2_client()?;
         let token_result: GoogleTokenResponse = client
             .exchange_refresh_token(&RefreshToken::new(creds.refresh_token.clone()))
             .request_async(&http_client)
@@ -36,9 +36,9 @@ impl GoogleOauthEndpoints {
 }
 
 /// Build the Google OAuth2 client from credentials.
-fn build_oauth2_client(creds: &GoogleCredential) -> Result<GoogleOauth2Client, NexusError> {
-    let client = OAuth2Client::new(ClientId::new(creds.client_id.clone()))
-        .set_client_secret(ClientSecret::new(creds.client_secret.clone()))
+fn build_oauth2_client() -> Result<GoogleOauth2Client, NexusError> {
+    let client = OAuth2Client::new(ClientId::new(GCLI_CLIENT_ID.to_string()))
+        .set_client_secret(ClientSecret::new(GCLI_CLIENT_SECRET.to_string()))
         .set_auth_uri(AuthUrl::new(GOOGLE_AUTH_URL.as_str().to_string())?)
         .set_token_uri(TokenUrl::new(GOOGLE_TOKEN_URI.as_str().to_string())?);
     Ok(client)

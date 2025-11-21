@@ -137,13 +137,12 @@ pub static GOOGLE_USERINFO_URI: LazyLock<Url> = LazyLock::new(|| {
         .expect("valid Google OAuth2 userinfo URI")
 });
 
-// Database URL for SQLite. Defaults to `sqlite://data.db` if `DATABASE_URL` is unset.
-// Access via CONFIG.database_url
+pub const GCLI_CLIENT_ID: &str = env!("GCLI_CLIENT_ID");
+pub const GCLI_CLIENT_SECRET: &str = env!("GCLI_CLIENT_SECRET");
 
-/// CLI/Proxy version and default User-Agent string. Built once globally.
 pub const CLI_VERSION: &str = "0.16.0";
 pub static CLI_USER_AGENT: LazyLock<String> =
-    LazyLock::new(|| format!("GeminiCLI/{v} (Linux; x86_64)", v = CLI_VERSION));
+    LazyLock::new(|| format!("GeminiCLI/{v} (Linux; x64)", v = CLI_VERSION));
 
 // Cloud Code Gemini endpoints
 pub static GEMINI_GENERATE_URL: LazyLock<reqwest::Url> = LazyLock::new(|| {

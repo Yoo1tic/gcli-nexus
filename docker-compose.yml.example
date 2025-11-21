@@ -8,13 +8,24 @@ services:
       # Required configuration
       NEXUS_KEY: pwd
 
+      # HTTP server listen address and port.
+      LISTEN_ADDR: 0.0.0.0
+      LISTEN_PORT: 8188
+
       # Optional configuration
       LOGLEVEL: info
+
       DATABASE_URL: sqlite:///app/data/data.db
+
       CRED_PATH: /app/credentials
+
       BIGMODEL_LIST: "[gemini-2.5-pro]"
+
       REFRESH_CONCURRENCY: 10
-      # PROXY: 
+
+      # Optional outbound HTTP proxy (scheme://user:pass@host:port). Remove if unused.
+      # PROXY="http://username:password@proxy.company.com:8080"
+
     volumes:
       # Persist SQLite database
       - ./data:/app/data
@@ -23,4 +34,3 @@ services:
 
     # Restart policy
     restart: unless-stopped
-

@@ -8,6 +8,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  GCLI_CLIENT_ID: ${{ secrets.GCLI_CLIENT_ID }}
+  GCLI_CLIENT_SECRET: ${{ secrets.GCLI_CLIENT_SECRET }}
+  SQLX_OFFLINE: true
 
 jobs:
   linux:

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE credentials SET\n                email = ?,\n                project_id = ?,\n                refresh_token = ?,\n                access_token = ?,\n                expiry = ?,\n                status = ?\n              WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "f47a35f85cf28cf3184373181616d4b4d7167ef6b64bc4368a5e76592d871744"
+}

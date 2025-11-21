@@ -30,7 +30,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loglevel = %cfg.loglevel,
         nexus_key = %cfg.nexus_key,
         listen_addr = %cfg.listen_addr,
-        listen_port = cfg.listen_port
+        listen_port = cfg.listen_port,
+        client_id = %gcli_nexus::config::GCLI_CLIENT_ID,
+        client_secret = %gcli_nexus::config::GCLI_CLIENT_SECRET
     );
 
     let _ = gcli_nexus::config::CONFIG.nexus_key.len();
@@ -49,7 +51,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "Background task: files loaded from filesystem, submitting to actor..."
                     );
 
-                    // This await now only blocks this background task, not the server start
                     handle_clone.submit_credentials(files).await;
 
                     info!(

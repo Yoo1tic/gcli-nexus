@@ -5,7 +5,6 @@ use oauth2::reqwest::Error as ReqwestClientError;
 use oauth2::{HttpClientError, RequestTokenError, StandardErrorResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::Error as SqlxError;
 use std::collections::HashMap;
 use thiserror::Error as ThisError;
 
@@ -39,7 +38,7 @@ pub enum NexusError {
     RactorError(String),
 
     #[error("Database error: {0}")]
-    DatabaseError(#[from] SqlxError),
+    DatabaseError(#[from] sqlx::Error),
 
     #[error("Upstream error with status: {0}")]
     UpstreamStatus(StatusCode),
@@ -200,18 +199,16 @@ impl IsRetryable for NexusError {
     fn is_retryable(&self) -> bool {
         match self {
             NexusError::ReqwestError(_) => true,
-            NexusError::GeminiServerError(e) => match e.error.status.as_str() {
-                "RESOURCE_EXHAUSTED" => true,
-                "UNAUTHENTICATED" => true,
-                "PERMISSION_DENIED" => true,
-                _ => false,
-            },
-            NexusError::UpstreamStatus(status) => match *status {
-                reqwest::StatusCode::TOO_MANY_REQUESTS => true,
-                reqwest::StatusCode::UNAUTHORIZED => true,
-                reqwest::StatusCode::FORBIDDEN => true,
-                _ => false,
-            },
+            NexusError::GeminiServerError(e) => matches!(
+                e.error.status.as_str(),
+                "RESOURCE_EXHAUSTED" | "UNAUTHENTICATED" | "PERMISSION_DENIED"
+            ),
+            NexusError::UpstreamStatus(status) => matches!(
+                *status,
+                reqwest::StatusCode::TOO_MANY_REQUESTS
+                    | reqwest::StatusCode::UNAUTHORIZED
+                    | reqwest::StatusCode::FORBIDDEN
+            ),
             NexusError::Oauth2Server { .. } => false,
             NexusError::UnexpectedError(_) => false,
             _ => false,
