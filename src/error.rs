@@ -10,26 +10,32 @@ use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub enum NexusError {
-    #[error("URL parse error: {0}")]
-    UrlParse(#[from] url::ParseError),
+    #[error("Upstream error with status: {0}")]
+    UpstreamStatus(StatusCode),
+
+    #[error("Gemini API error: {0:?}")]
+    GeminiServerError(GeminiError),
 
     #[error("HTTP request error: {0}")]
     ReqwestError(#[from] reqwest::Error),
 
     #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
+    JsonError(#[from] serde_json::Error),
+
+    #[error("URL parse error: {0}")]
+    UrlError(#[from] url::ParseError),
+
+    #[error("Stream protocol error: {0}")]
+    StreamProtocolError(String),
 
     #[error("Missing access token; refresh first")]
     MissingAccessToken,
 
-    #[error("missing email in userinfo response")]
-    MissingEmailInUserinfo,
+    #[error("OAuth2 server error: {error}")]
+    Oauth2Server { error: String },
 
     #[error("Unexpected error: {0}")]
     UnexpectedError(String),
-
-    #[error("OAuth2 server error: {error}")]
-    Oauth2Server { error: String },
 
     #[error("No available credential")]
     NoAvailableCredential,
@@ -39,12 +45,6 @@ pub enum NexusError {
 
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
-
-    #[error("Upstream error with status: {0}")]
-    UpstreamStatus(StatusCode),
-
-    #[error("Gemini API error: {0:?}")]
-    GeminiServerError(GeminiError),
 }
 
 impl NexusError {}
@@ -62,7 +62,9 @@ impl From<PkgsRequestTokenError> for NexusError {
                 oauth2::HttpClientError::Reqwest(real_err) => NexusError::ReqwestError(*real_err),
                 other => NexusError::UnexpectedError(format!("HttpClientError: {:?}", other)),
             },
-            RequestTokenError::Parse(parse_err, _body) => NexusError::Json(parse_err.into_inner()),
+            RequestTokenError::Parse(parse_err, _body) => {
+                NexusError::JsonError(parse_err.into_inner())
+            }
             RequestTokenError::Other(s) => NexusError::UnexpectedError(s),
         }
     }
@@ -80,7 +82,10 @@ impl IntoResponse for NexusError {
                 };
                 (status, body)
             }
-            NexusError::DatabaseError(_) | NexusError::RactorError(_) => {
+            NexusError::DatabaseError(_)
+            | NexusError::RactorError(_)
+            | NexusError::UnexpectedError(_)
+            | NexusError::MissingAccessToken => {
                 let status = StatusCode::INTERNAL_SERVER_ERROR;
                 let body = ApiErrorBody {
                     code: "INTERNAL_ERROR".to_string(),
@@ -88,31 +93,30 @@ impl IntoResponse for NexusError {
                 };
                 (status, body)
             }
-            NexusError::Json(_)
-            | NexusError::UnexpectedError(_)
-            | NexusError::Oauth2Server { .. }
-            | NexusError::MissingAccessToken
-            | NexusError::MissingEmailInUserinfo => {
-                let status = StatusCode::UNAUTHORIZED;
+            NexusError::JsonError(_) => {
+                let status = StatusCode::BAD_GATEWAY;
                 let body = ApiErrorBody {
-                    code: "UNAUTHORIZED".to_string(),
-                    message: "Authentication error.".to_string(),
+                    code: "BAD_UPSTREAM_PAYLOAD".to_string(),
+                    message: "Failed to parse upstream response.".to_string(),
+                };
+                (status, body)
+            }
+            NexusError::StreamProtocolError(_)
+            | NexusError::Oauth2Server { .. }
+            | NexusError::ReqwestError(_)
+            | NexusError::UrlError(_) => {
+                let status = StatusCode::BAD_GATEWAY;
+                let body = ApiErrorBody {
+                    code: "UPSTREAM_ERROR".to_string(),
+                    message: "Upstream service error.".to_string(),
                 };
                 (status, body)
             }
             NexusError::NoAvailableCredential => {
-                let status = StatusCode::SERVICE_UNAVAILABLE; // 503
+                let status = StatusCode::CONFLICT;
                 let body = ApiErrorBody {
                     code: "NO_CREDENTIAL".to_string(),
                     message: "No available credentials to process the request.".to_string(),
-                };
-                (status, body)
-            }
-            NexusError::ReqwestError(_) | NexusError::UrlParse(_) => {
-                let status = StatusCode::BAD_GATEWAY;
-                let body = ApiErrorBody {
-                    code: "BAD_GATEWAY".to_string(),
-                    message: "Upstream service is unavailable.".to_string(),
                 };
                 (status, body)
             }
@@ -126,7 +130,6 @@ impl IntoResponse for NexusError {
                     StatusCode::NOT_FOUND => ("NOT_FOUND", "Upstream resource not found."),
                     _ => ("UPSTREAM_ERROR", "An upstream error occurred."),
                 };
-
                 (
                     code,
                     ApiErrorBody {

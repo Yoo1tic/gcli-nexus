@@ -1,27 +1,11 @@
-use axum::{
-    Json,
-    body::Body,
-    http::{
-        HeaderValue, StatusCode,
-        header::{CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING},
-    },
-    response::{
-        IntoResponse, Response,
-        sse::{Event, Sse},
-    },
-};
-use backon::{ExponentialBuilder, Retryable};
-use eventsource_stream::{Event as UpstreamEvent, Eventsource};
-use futures::{StreamExt, TryStreamExt};
-use serde::Serialize;
-use serde_json::json;
-use std::{io, time::Duration};
-use tracing::{error, info, warn};
-
 use crate::error::{GeminiError, IsRetryable, NexusError};
 use crate::middleware::gemini_request::{GeminiContext, GeminiRequestBody};
 use crate::router::NexusState;
-use crate::types::cli::{cli_bytes_to_aistudio, cli_str_to_aistudio};
+use axum::http::StatusCode;
+use backon::{ExponentialBuilder, Retryable};
+use serde::Serialize;
+use std::time::Duration;
+use tracing::{error, info, warn};
 
 use super::gemini_api::GeminiApi;
 
@@ -196,113 +180,5 @@ impl GeminiClient {
                 );
             })
             .await
-    }
-
-    pub async fn build_json_response(upstream_resp: reqwest::Response) -> Response {
-        let status = upstream_resp.status();
-        let original_headers = upstream_resp.headers().clone();
-        match upstream_resp.bytes().await {
-            Ok(bytes) => {
-                let converted = convert_cli_envelope_bytes(&bytes);
-                let content_len = converted.len();
-                let mut response = Response::builder()
-                    .status(status)
-                    .body(Body::from(converted))
-                    .unwrap_or_else(|_| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error":"build response failed"})),
-                        )
-                            .into_response()
-                    });
-
-                {
-                    let headers_mut = response.headers_mut();
-                    *headers_mut = original_headers;
-                    headers_mut.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                    headers_mut.remove(CONTENT_LENGTH);
-                    headers_mut.remove(TRANSFER_ENCODING);
-                    if let Ok(value) = HeaderValue::from_str(&content_len.to_string()) {
-                        headers_mut.insert(CONTENT_LENGTH, value);
-                    }
-                }
-
-                response
-            }
-            Err(e) => {
-                error!(error = %e, "failed to read upstream response body");
-                (
-                    StatusCode::BAD_GATEWAY,
-                    Json(json!({ "error": "failed to read upstream response" })),
-                )
-                    .into_response()
-            }
-        }
-    }
-
-    pub fn build_stream_response(upstream_resp: reqwest::Response) -> Response {
-        let status = upstream_resp.status();
-        let original_headers = upstream_resp.headers().clone();
-        let sse_stream = upstream_resp
-            .bytes_stream()
-            .map_err(io::Error::other)
-            .eventsource()
-            .map(|result| result.map_err(io::Error::other))
-            .filter_map(|result| async {
-                match result {
-                    Ok(event) => convert_upstream_event(event).map(Ok),
-                    Err(err) => Some(Err(err)),
-                }
-            });
-
-        let mut response = Sse::new(sse_stream).into_response();
-        *response.status_mut() = status;
-        *response.headers_mut() = original_headers;
-        response
-    }
-}
-
-fn convert_cli_envelope_bytes(body: &[u8]) -> Vec<u8> {
-    match cli_bytes_to_aistudio(body) {
-        Ok(resp) => match serde_json::to_vec(&resp) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                warn!(error = %e, "failed to serialize converted CLI payload");
-                body.to_vec()
-            }
-        },
-        Err(e) => {
-            warn!(error = %e, "failed to convert CLI response body");
-            body.to_vec()
-        }
-    }
-}
-
-fn convert_upstream_event(event: UpstreamEvent) -> Option<Event> {
-    let payload = convert_cli_sse_payload(&event.data)?;
-    let mut axum_event = Event::default().data(payload);
-    if !event.event.is_empty() && event.event != "message" {
-        axum_event = axum_event.event(event.event);
-    }
-    if !event.id.is_empty() {
-        axum_event = axum_event.id(event.id);
-    }
-    if let Some(retry) = event.retry {
-        axum_event = axum_event.retry(retry);
-    }
-    Some(axum_event)
-}
-
-fn convert_cli_sse_payload(payload: &str) -> Option<String> {
-    let trimmed = payload.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    match cli_str_to_aistudio(trimmed).and_then(|resp| serde_json::to_string(&resp)) {
-        Ok(converted) => Some(converted),
-        Err(e) => {
-            warn!(error = %e, "failed to parse CLI SSE payload as JSON");
-            Some(trimmed.to_string())
-        }
     }
 }

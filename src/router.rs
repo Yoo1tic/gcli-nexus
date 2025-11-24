@@ -47,8 +47,8 @@ impl NexusState {
 }
 
 pub fn nexus_router(state: NexusState) -> Router {
+    use crate::handlers::gemini::gemini_cli_handler;
     use crate::middleware::auth::RequireKeyAuth;
-    use crate::middleware::gemini_request::gemini_cli_handler;
     Router::new()
         .route("/v1beta/models/{*path}", any(gemini_cli_handler))
         .layer(middleware::from_extractor::<RequireKeyAuth>())

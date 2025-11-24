@@ -3,6 +3,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod google_oauth;
+pub mod handlers;
 pub mod middleware;
 pub mod router;
 pub mod service;
