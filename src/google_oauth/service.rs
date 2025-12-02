@@ -13,6 +13,14 @@ use tracing::{debug, error, info, warn};
 
 // Refresh pipeline tuning moved to Config.refresh_concurrency.
 
+fn default_retry_policy() -> ExponentialBuilder {
+    ExponentialBuilder::default()
+        .with_min_delay(Duration::from_secs(1))
+        .with_max_delay(Duration::from_secs(3))
+        .with_max_times(3)
+        .with_jitter()
+}
+
 /// Service layer to compose Google OAuth operations.
 pub struct GoogleOauthService {
     refresh_tx: mpsc::UnboundedSender<RefreshJob>,
@@ -51,11 +59,7 @@ impl GoogleOauthService {
             .default_headers(headers)
             .build()
             .expect("FATAL: initialize GoogleOauthService HTTP client failed");
-        let retry_policy = ExponentialBuilder::default()
-            .with_min_delay(Duration::from_secs(1))
-            .with_max_delay(Duration::from_secs(3))
-            .with_max_times(3)
-            .with_jitter();
+        let retry_policy = default_retry_policy();
 
         // Refresh pipeline: unbounded channel + concurrent worker
         let (refresh_tx, refresh_rx) = mpsc::unbounded_channel::<RefreshJob>();
@@ -118,6 +122,27 @@ impl GoogleOauthService {
             .map_err(|e| NexusError::RactorError(format!("send refresh job failed: {}", e)))?;
         rx.await
             .map_err(|e| NexusError::RactorError(format!("recv refresh result failed: {}", e)))?
+    }
+
+    /// Call loadCodeAssist with network-aware retries.
+    pub async fn load_code_assist_with_retry(
+        access_token: impl AsRef<str>,
+        http_client: reqwest::Client,
+    ) -> Result<Value, NexusError> {
+        let retry_policy = default_retry_policy();
+
+        (|| async {
+            GoogleOauthEndpoints::load_code_assist(access_token.as_ref(), http_client.clone()).await
+        })
+        .retry(retry_policy)
+        .when(|e: &NexusError| e.is_retryable())
+        .notify(|err, dur: Duration| {
+            warn!(
+                "loadCodeAssist retrying after error {}, sleeping {:?}",
+                err, dur
+            );
+        })
+        .await
     }
 }
 

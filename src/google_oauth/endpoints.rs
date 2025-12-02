@@ -22,6 +22,41 @@ use tracing::info;
 pub(crate) struct GoogleOauthEndpoints;
 
 const LOAD_CODE_ASSIST_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
+const ONBOARD_CODE_ASSIST_URL: &str =
+    "https://cloudcode-pa.googleapis.com/v1internal:onboardCodeAssist";
+const IDE_TYPE: &str = "IDE_UNSPECIFIED";
+const PLATFORM: &str = "PLATFORM_UNSPECIFIED";
+const PLUGIN_TYPE: &str = "GEMINI";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OnboardMetadata {
+    ide_type: &'static str,
+    platform: &'static str,
+    plugin_type: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duet_project: Option<String>,
+}
+
+impl OnboardMetadata {
+    fn default() -> Self {
+        Self {
+            ide_type: IDE_TYPE,
+            platform: PLATFORM,
+            plugin_type: PLUGIN_TYPE,
+            duet_project: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OnboardRequest {
+    tier_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cloudaicompanion_project: Option<String>,
+    metadata: OnboardMetadata,
+}
 
 pub(crate) static DEFAULT_SCOPES: LazyLock<Vec<Scope>> = LazyLock::new(|| {
     vec![
@@ -95,6 +130,39 @@ impl GoogleOauthEndpoints {
             .post(LOAD_CODE_ASSIST_URL)
             .bearer_auth(access_token.as_ref())
             .json(&json!({}))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Err(NexusError::UpstreamStatus(resp.status()));
+        }
+
+        let body: Value = resp.json().await?;
+        Ok(body)
+    }
+
+    /// Call Cloud Code's onboardCodeAssist to provision a companion project and tier.
+    pub(crate) async fn onboard_code_assist(
+        access_token: impl AsRef<str>,
+        tier_id: impl AsRef<str>,
+        cloudaicompanion_project: Option<String>,
+        http_client: reqwest::Client,
+    ) -> Result<Value, NexusError> {
+        let mut metadata = OnboardMetadata::default();
+        if let Some(project) = cloudaicompanion_project.clone() {
+            metadata.duet_project = Some(project.clone());
+        }
+
+        let request = OnboardRequest {
+            tier_id: tier_id.as_ref().to_string(),
+            cloudaicompanion_project,
+            metadata,
+        };
+
+        let resp = http_client
+            .post(ONBOARD_CODE_ASSIST_URL)
+            .bearer_auth(access_token.as_ref())
+            .json(&request)
             .send()
             .await?;
 

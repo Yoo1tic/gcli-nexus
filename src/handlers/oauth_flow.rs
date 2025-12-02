@@ -1,7 +1,9 @@
 use crate::config::CONFIG;
 use crate::google_oauth::credentials::GoogleCredential;
 use crate::google_oauth::endpoints::GoogleOauthEndpoints;
+use crate::google_oauth::service::GoogleOauthService;
 use crate::google_oauth::utils::attach_email_from_id_token;
+use crate::types::google_code_assist::{LoadCodeAssistResponse, OnboardOperationResponse};
 use crate::{NexusError, router::NexusState};
 use axum::{
     Json,
@@ -11,8 +13,8 @@ use axum::{
 };
 use axum_extra::extract::cookie::{Cookie, PrivateCookieJar, SameSite};
 use oauth2::{AuthorizationCode, PkceCodeChallenge, PkceCodeVerifier};
+use reqwest::Client;
 use serde::Deserialize;
-use serde_json::Value;
 use subtle::ConstantTimeEq;
 use time::Duration;
 use tracing::{debug, error, info};
@@ -25,7 +27,6 @@ pub struct AuthCallbackQuery {
     pub code: String,
     pub state: String,
 }
-
 /// GET /auth/:secret
 pub async fn google_oauth_entry(
     Path(secret): Path<String>,
@@ -118,51 +119,13 @@ async fn process_oauth_exchange(
         .clone()
         .ok_or(NexusError::MissingAccessToken)?;
 
-    let load_resp =
-        GoogleOauthEndpoints::load_code_assist(access_token, state.client.clone()).await?;
-    debug!(body = %load_resp, "loadCodeAssist upstream body");
+    let (project_id, tier_id) =
+        ensure_companion_project(access_token.as_str(), &state.client).await?;
 
-    if let Some(ineligible) = load_resp
-        .get("ineligibleTiers")
-        .and_then(Value::as_array)
-        .and_then(|tiers| tiers.get(0))
-    {
-        let reason_code = ineligible
-            .get("reasonCode")
-            .and_then(Value::as_str)
-            .unwrap_or("ACCOUNT_INELIGIBLE");
-        let reason_message = ineligible
-            .get("reasonMessage")
-            .and_then(Value::as_str)
-            .unwrap_or("Account is not eligible for Gemini Code Assist");
-        return Err(NexusError::OauthFlowError {
-            code: reason_code.to_string(),
-            message: reason_message.to_string(),
-            details: Some(load_resp.clone()),
-        });
-    }
-
-    let project_id = load_resp
-        .get("cloudaicompanionProject")
-        .and_then(Value::as_str)
-        .ok_or_else(|| NexusError::OauthFlowError {
-            code: "MISSING_COMPANION_PROJECT".to_string(),
-            message: "loadCodeAssist missing cloudaicompanionProject".to_string(),
-            details: None,
-        })?;
-
-    let quota_tier = load_resp
-        .get("allowedTiers")
-        .and_then(Value::as_array)
-        .and_then(|tiers| tiers.get(0))
-        .and_then(|tier| tier.get("quotaTier"))
-        .and_then(Value::as_str)
-        .unwrap_or("<unknown>");
-
-    credential.project_id = project_id.to_string();
+    credential.project_id = project_id.clone();
     info!(
         project_id = %project_id,
-        quota_tier = %quota_tier,
+        tier = %tier_id,
         "loadCodeAssist resolved companion project id"
     );
 
@@ -172,6 +135,85 @@ async fn process_oauth_exchange(
         .await;
 
     Ok(credential)
+}
+
+async fn ensure_companion_project(
+    access_token: &str,
+    client: &Client,
+) -> Result<(String, String), NexusError> {
+    let load_json =
+        GoogleOauthService::load_code_assist_with_retry(access_token, client.clone()).await?;
+    debug!(body = %load_json, "loadCodeAssist upstream body");
+
+    let load_resp: LoadCodeAssistResponse =
+        serde_json::from_value(load_json.clone()).map_err(NexusError::JsonError)?;
+
+    if let Some(ineligible) = load_resp.ineligible_tiers.first() {
+        return Err(NexusError::OauthFlowError {
+            code: ineligible
+                .reason_code
+                .clone()
+                .unwrap_or_else(|| "ACCOUNT_INELIGIBLE".to_string()),
+            message: ineligible
+                .reason_message
+                .clone()
+                .unwrap_or_else(|| "Account is not eligible for Gemini Code Assist".to_string()),
+            details: Some(load_json),
+        });
+    }
+
+    let tier_id = load_resp
+        .allowed_tiers
+        .first()
+        .and_then(|t| t.quota_tier.clone())
+        .or_else(|| load_resp.current_tier.and_then(|t| t.quota_tier))
+        .unwrap_or_else(|| "standard-tier".to_string());
+
+    if let Some(existing_project_id) = load_resp.cloudaicompanion_project {
+        return Ok((existing_project_id, tier_id));
+    }
+
+    info!("No existing companion project found, starting onboarding...");
+    let new_project_id = perform_onboarding(access_token, tier_id.clone(), client).await?;
+
+    Ok((new_project_id, tier_id))
+}
+
+async fn perform_onboarding(
+    access_token: &str,
+    tier_id: String,
+    client: &Client,
+) -> Result<String, NexusError> {
+    let resp_json = GoogleOauthEndpoints::onboard_code_assist(
+        access_token.to_string(),
+        tier_id,
+        None,
+        client.clone(),
+    )
+    .await?;
+    debug!(body = %resp_json, "onboardCodeAssist upstream body");
+
+    let op_resp: OnboardOperationResponse =
+        serde_json::from_value(resp_json.clone()).map_err(NexusError::JsonError)?;
+
+    if !op_resp.done {
+        return Err(NexusError::OauthFlowError {
+            code: "ONBOARD_IN_PROGRESS".to_string(),
+            message: "Companion project provisioning is still in progress; retry shortly."
+                .to_string(),
+            details: Some(resp_json.clone()),
+        });
+    }
+
+    op_resp
+        .response
+        .and_then(|r| r.project_details)
+        .map(|p| p.id)
+        .ok_or_else(|| NexusError::OauthFlowError {
+            code: "ONBOARD_FAILED".to_string(),
+            message: "Onboarding completed but returned no project ID".to_string(),
+            details: Some(resp_json),
+        })
 }
 
 fn take_oauth_cookies(jar: PrivateCookieJar) -> (PrivateCookieJar, Option<(String, String)>) {
