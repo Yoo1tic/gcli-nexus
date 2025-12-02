@@ -7,26 +7,25 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Redirect},
 };
 use axum_extra::extract::cookie::{Cookie, PrivateCookieJar, SameSite};
-use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier};
+use oauth2::{AuthorizationCode, PkceCodeChallenge, PkceCodeVerifier};
 use serde::Deserialize;
-use serde_json::Value;
 use subtle::ConstantTimeEq;
 use time::Duration;
-use tracing::info;
-
-#[derive(Debug, Deserialize)]
-pub struct AuthCallbackQuery {
-    pub code: Option<String>,
-    pub state: Option<String>,
-}
+use tracing::{error, info};
 
 const CSRF_COOKIE: &str = "oauth_csrf_token";
 const PKCE_COOKIE: &str = "oauth_pkce_verifier";
 
-/// GET /auth/:secret -> redirects to Google's OAuth2 consent page when the secret matches.
+#[derive(Debug, Deserialize)]
+pub struct AuthCallbackQuery {
+    pub code: String,
+    pub state: String,
+}
+
+/// GET /auth/:secret
 pub async fn google_oauth_entry(
     Path(secret): Path<String>,
     jar: PrivateCookieJar,
@@ -36,92 +35,76 @@ pub async fn google_oauth_entry(
     }
 
     let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
-    let pkce_verifier = verifier.secret().to_string();
-
     let (auth_url, csrf_token) = GoogleOauthEndpoints::build_authorize_url(challenge);
 
-    let jar = store_oauth_cookies(jar, &csrf_token, &pkce_verifier);
+    let jar = jar
+        .add(build_cookie(CSRF_COOKIE, csrf_token.secret().to_string()))
+        .add(build_cookie(PKCE_COOKIE, verifier.secret().to_string()));
 
-    info!(
-        "Dispatching OAuth redirect, Auth URL: {}",
-        auth_url.as_ref()
-    );
+    info!("Dispatching OAuth redirect to: {}", auth_url);
+
     Ok((jar, Redirect::temporary(auth_url.as_ref())).into_response())
 }
 
-/// GET /auth/callback -> exchanges auth code for tokens and stores them.
+/// GET /auth/callback
 pub async fn google_oauth_callback(
     State(state): State<NexusState>,
     Query(query): Query<AuthCallbackQuery>,
     jar: PrivateCookieJar,
 ) -> impl IntoResponse {
-    let (pkce_verifier, csrf_cookie, jar) = match load_oauth_session(jar) {
-        Ok(data) => data,
-        Err((jar, err)) => return respond_with_error(jar, err),
-    };
+    let (jar, session_data) = take_oauth_cookies(jar);
 
-    let state_param = match query.state.as_deref() {
-        Some(s) => s,
-        None => {
-            return respond_with_error(
-                jar,
-                NexusError::OauthFlowError("missing `state` in callback".to_string()),
-            );
+    let result = process_oauth_exchange(&state, &query, session_data).await;
+
+    match result {
+        Ok(credential) => {
+            info!("OAuth callback stored credential successfully");
+            (jar, Json(credential)).into_response()
         }
-    };
+        Err(err) => {
+            error!("OAuth failure: {:?}", err);
+            (jar, err.into_response()).into_response()
+        }
+    }
+}
 
-    if state_param != csrf_cookie {
-        return respond_with_error(
-            jar,
-            NexusError::OauthFlowError("CSRF token mismatch".to_string()),
-        );
+async fn process_oauth_exchange(
+    state: &NexusState,
+    query: &AuthCallbackQuery,
+    session_data: Option<(String, String)>,
+) -> Result<GoogleCredential, NexusError> {
+    let (pkce_verifier, csrf_token) = session_data
+        .ok_or_else(|| NexusError::OauthFlowError("Missing OAuth session cookies".to_string()))?;
+
+    if query.state != csrf_token {
+        return Err(NexusError::OauthFlowError(
+            "CSRF token mismatch".to_string(),
+        ));
     }
 
-    let code = match query.code.as_deref() {
-        Some(code) => code,
-        None => {
-            return respond_with_error(
-                jar,
-                NexusError::OauthFlowError("missing `code` in callback".to_string()),
-            );
-        }
-    };
-
-    let token_response = match GoogleOauthEndpoints::exchange_authorization_code(
-        AuthorizationCode::new(code.to_owned()),
+    let token_response = GoogleOauthEndpoints::exchange_authorization_code(
+        AuthorizationCode::new(query.code.clone()),
         PkceCodeVerifier::new(pkce_verifier),
         state.client.clone(),
     )
     .await
-    {
-        Ok(res) => res,
-        Err(err) => return respond_with_error(jar, err),
-    };
+    .map_err(|e| NexusError::OauthFlowError(format!("Token exchange failed: {}", e)))?;
 
-    let mut token_value: Value = match serde_json::to_value(&token_response) {
-        Ok(v) => v,
-        Err(err) => return respond_with_error(jar, NexusError::JsonError(err)),
-    };
+    let mut token_value = serde_json::to_value(&token_response).map_err(NexusError::JsonError)?;
+
     attach_email_from_id_token(&mut token_value);
 
-    let credential = match GoogleCredential::from_payload(&token_value) {
-        Ok(cred) => cred,
-        Err(err) => return respond_with_error(jar, err),
-    };
+    let credential = GoogleCredential::from_payload(&token_value)?;
 
     if credential.refresh_token.is_empty() {
-        return respond_with_error(
-            jar,
-            NexusError::OauthFlowError(
-                "OAuth response missing refresh_token; ensure access_type=offline and prompt=consent are allowed for this client/user".to_string(),
-            ),
-        );
+        return Err(NexusError::OauthFlowError(
+            "Missing refresh_token (check access_type=offline)".to_string(),
+        ));
     }
     if credential.access_token.is_none() {
-        return respond_with_error(
-            jar,
-            NexusError::UnexpectedError("missing access_token in OAuth response".into()),
-        );
+        return Err(NexusError::UnexpectedError(
+            "Missing access_token".to_string(),
+        ));
     }
 
     state
@@ -129,65 +112,28 @@ pub async fn google_oauth_callback(
         .submit_credentials(vec![credential.clone()])
         .await;
 
-    info!("OAuth callback stored credential");
-    (jar, Json(credential)).into_response()
+    Ok(credential)
 }
 
-fn store_oauth_cookies(
-    jar: PrivateCookieJar,
-    csrf: &CsrfToken,
-    pkce_verifier: &str,
-) -> PrivateCookieJar {
-    jar.add(build_cookie(CSRF_COOKIE, csrf.secret().to_string()))
-        .add(build_cookie(PKCE_COOKIE, pkce_verifier.to_string()))
+fn take_oauth_cookies(jar: PrivateCookieJar) -> (PrivateCookieJar, Option<(String, String)>) {
+    let csrf = jar.get(CSRF_COOKIE).map(|c| c.value().to_string());
+    let pkce = jar.get(PKCE_COOKIE).map(|c| c.value().to_string());
+
+    let jar = jar
+        .remove(Cookie::from(CSRF_COOKIE))
+        .remove(Cookie::from(PKCE_COOKIE));
+
+    match (pkce, csrf) {
+        (Some(p), Some(c)) => (jar, Some((p, c))),
+        _ => (jar, None),
+    }
 }
 
-fn load_oauth_session(
-    jar: PrivateCookieJar,
-) -> Result<(String, String, PrivateCookieJar), (PrivateCookieJar, NexusError)> {
-    let Some(csrf_cookie) = jar.get(CSRF_COOKIE).map(|c| c.value().to_owned()) else {
-        let jar = clear_oauth_cookies(jar);
-        return Err((
-            jar,
-            NexusError::OauthFlowError("Missing CSRF token in cookie".to_string()),
-        ));
-    };
-
-    let Some(pkce_cookie) = jar.get(PKCE_COOKIE).map(|c| c.value().to_owned()) else {
-        let jar = clear_oauth_cookies(jar);
-        return Err((
-            jar,
-            NexusError::OauthFlowError("Missing PKCE verifier in cookie".to_string()),
-        ));
-    };
-
-    let jar = clear_oauth_cookies(jar);
-
-    Ok((pkce_cookie, csrf_cookie, jar))
-}
-
-fn clear_oauth_cookies(jar: PrivateCookieJar) -> PrivateCookieJar {
-    jar.remove(clear_cookie(CSRF_COOKIE))
-        .remove(clear_cookie(PKCE_COOKIE))
-}
-
-fn build_cookie(name: &str, value: String) -> Cookie<'static> {
-    Cookie::build(Cookie::new(name.to_string(), value))
+fn build_cookie(name: &'static str, value: String) -> Cookie<'static> {
+    Cookie::build((name, value))
         .path("/")
         .http_only(true)
         .same_site(SameSite::Lax)
         .max_age(Duration::minutes(15))
         .build()
-}
-
-fn clear_cookie(name: &str) -> Cookie<'static> {
-    Cookie::build(Cookie::new(name.to_string(), ""))
-        .path("/")
-        .http_only(true)
-        .same_site(SameSite::Lax)
-        .build()
-}
-
-fn respond_with_error(jar: PrivateCookieJar, err: NexusError) -> Response {
-    (jar, err.into_response()).into_response()
 }
