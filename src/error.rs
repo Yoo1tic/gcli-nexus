@@ -13,8 +13,12 @@ pub enum NexusError {
     #[error("Upstream error with status: {0}")]
     UpstreamStatus(StatusCode),
 
-    #[error("OAuth flow error: {0}")]
-    OauthFlowError(String),
+    #[error("OAuth flow error: {message}")]
+    OauthFlowError {
+        code: String,
+        message: String,
+        details: Option<Value>,
+    },
 
     #[error("Gemini API error: {0:?}")]
     GeminiServerError(GeminiError),
@@ -82,6 +86,7 @@ impl IntoResponse for NexusError {
                 let body = ApiErrorBody {
                     code: gemini_err.error.status,
                     message: gemini_err.error.message,
+                    details: None,
                 };
                 (status, body)
             }
@@ -93,14 +98,20 @@ impl IntoResponse for NexusError {
                 let body = ApiErrorBody {
                     code: "INTERNAL_ERROR".to_string(),
                     message: "An internal server error occurred.".to_string(),
+                    details: None,
                 };
                 (status, body)
             }
-            NexusError::OauthFlowError(msg) => {
-                let status = StatusCode::BAD_REQUEST;
+            NexusError::OauthFlowError {
+                code,
+                message,
+                details,
+            } => {
+                let status = StatusCode::FORBIDDEN;
                 let body = ApiErrorBody {
-                    code: "OAUTH_FLOW_ERROR".to_string(),
-                    message: msg,
+                    code,
+                    message,
+                    details,
                 };
                 (status, body)
             }
@@ -109,6 +120,7 @@ impl IntoResponse for NexusError {
                 let body = ApiErrorBody {
                     code: "BAD_UPSTREAM_PAYLOAD".to_string(),
                     message: "Failed to parse upstream response.".to_string(),
+                    details: None,
                 };
                 (status, body)
             }
@@ -120,6 +132,7 @@ impl IntoResponse for NexusError {
                 let body = ApiErrorBody {
                     code: "UPSTREAM_ERROR".to_string(),
                     message: "Upstream service error.".to_string(),
+                    details: None,
                 };
                 (status, body)
             }
@@ -128,6 +141,7 @@ impl IntoResponse for NexusError {
                 let body = ApiErrorBody {
                     code: "NO_CREDENTIAL".to_string(),
                     message: "No available credentials to process the request.".to_string(),
+                    details: None,
                 };
                 (status, body)
             }
@@ -146,6 +160,7 @@ impl IntoResponse for NexusError {
                     ApiErrorBody {
                         code: err_code.to_string(),
                         message: msg.to_string(),
+                        details: None,
                     },
                 )
             }
@@ -159,6 +174,8 @@ impl IntoResponse for NexusError {
 pub struct ApiErrorBody {
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
 }
 
 #[derive(Serialize)]

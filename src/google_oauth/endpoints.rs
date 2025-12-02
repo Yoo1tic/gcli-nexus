@@ -14,11 +14,14 @@ use oauth2::{
     },
 };
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::sync::LazyLock;
 use tracing::info;
 
 /// Stateless Google OAuth Endpoints.
 pub(crate) struct GoogleOauthEndpoints;
+
+const LOAD_CODE_ASSIST_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
 
 pub(crate) static DEFAULT_SCOPES: LazyLock<Vec<Scope>> = LazyLock::new(|| {
     vec![
@@ -81,6 +84,26 @@ impl GoogleOauthEndpoints {
             .await?;
         info!("OAuth2 code exchange completed successfully");
         Ok(token_result)
+    }
+
+    /// Call Cloud Code's loadCodeAssist to fetch subscription metadata and the companion project.
+    pub(crate) async fn load_code_assist(
+        access_token: impl AsRef<str>,
+        http_client: reqwest::Client,
+    ) -> Result<Value, NexusError> {
+        let resp = http_client
+            .post(LOAD_CODE_ASSIST_URL)
+            .bearer_auth(access_token.as_ref())
+            .json(&json!({}))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Err(NexusError::UpstreamStatus(resp.status()));
+        }
+
+        let body: Value = resp.json().await?;
+        Ok(body)
     }
 }
 

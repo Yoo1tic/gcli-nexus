@@ -12,9 +12,10 @@ use axum::{
 use axum_extra::extract::cookie::{Cookie, PrivateCookieJar, SameSite};
 use oauth2::{AuthorizationCode, PkceCodeChallenge, PkceCodeVerifier};
 use serde::Deserialize;
+use serde_json::Value;
 use subtle::ConstantTimeEq;
 use time::Duration;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 const CSRF_COOKIE: &str = "oauth_csrf_token";
 const PKCE_COOKIE: &str = "oauth_pkce_verifier";
@@ -73,13 +74,18 @@ async fn process_oauth_exchange(
     query: &AuthCallbackQuery,
     session_data: Option<(String, String)>,
 ) -> Result<GoogleCredential, NexusError> {
-    let (pkce_verifier, csrf_token) = session_data
-        .ok_or_else(|| NexusError::OauthFlowError("Missing OAuth session cookies".to_string()))?;
+    let (pkce_verifier, csrf_token) = session_data.ok_or_else(|| NexusError::OauthFlowError {
+        code: "OAUTH_SESSION_MISSING".to_string(),
+        message: "Missing OAuth session cookies".to_string(),
+        details: None,
+    })?;
 
     if query.state != csrf_token {
-        return Err(NexusError::OauthFlowError(
-            "CSRF token mismatch".to_string(),
-        ));
+        return Err(NexusError::OauthFlowError {
+            code: "CSRF_MISMATCH".to_string(),
+            message: "CSRF token mismatch".to_string(),
+            details: None,
+        });
     }
 
     let token_response = GoogleOauthEndpoints::exchange_authorization_code(
@@ -88,24 +94,77 @@ async fn process_oauth_exchange(
         state.client.clone(),
     )
     .await
-    .map_err(|e| NexusError::OauthFlowError(format!("Token exchange failed: {}", e)))?;
+    .map_err(|e| NexusError::OauthFlowError {
+        code: "TOKEN_EXCHANGE_FAILED".to_string(),
+        message: format!("Token exchange failed: {}", e),
+        details: None,
+    })?;
 
     let mut token_value = serde_json::to_value(&token_response).map_err(NexusError::JsonError)?;
 
     attach_email_from_id_token(&mut token_value);
 
-    let credential = GoogleCredential::from_payload(&token_value)?;
+    let mut credential = GoogleCredential::from_payload(&token_value)?;
 
     if credential.refresh_token.is_empty() {
-        return Err(NexusError::OauthFlowError(
-            "Missing refresh_token (check access_type=offline)".to_string(),
-        ));
+        return Err(NexusError::OauthFlowError {
+            code: "MISSING_REFRESH_TOKEN".to_string(),
+            message: "Missing refresh_token (check access_type=offline)".to_string(),
+            details: None,
+        });
     }
-    if credential.access_token.is_none() {
-        return Err(NexusError::UnexpectedError(
-            "Missing access_token".to_string(),
-        ));
+    let access_token = credential
+        .access_token
+        .clone()
+        .ok_or(NexusError::MissingAccessToken)?;
+
+    let load_resp =
+        GoogleOauthEndpoints::load_code_assist(access_token, state.client.clone()).await?;
+    debug!(body = %load_resp, "loadCodeAssist upstream body");
+
+    if let Some(ineligible) = load_resp
+        .get("ineligibleTiers")
+        .and_then(Value::as_array)
+        .and_then(|tiers| tiers.get(0))
+    {
+        let reason_code = ineligible
+            .get("reasonCode")
+            .and_then(Value::as_str)
+            .unwrap_or("ACCOUNT_INELIGIBLE");
+        let reason_message = ineligible
+            .get("reasonMessage")
+            .and_then(Value::as_str)
+            .unwrap_or("Account is not eligible for Gemini Code Assist");
+        return Err(NexusError::OauthFlowError {
+            code: reason_code.to_string(),
+            message: reason_message.to_string(),
+            details: Some(load_resp.clone()),
+        });
     }
+
+    let project_id = load_resp
+        .get("cloudaicompanionProject")
+        .and_then(Value::as_str)
+        .ok_or_else(|| NexusError::OauthFlowError {
+            code: "MISSING_COMPANION_PROJECT".to_string(),
+            message: "loadCodeAssist missing cloudaicompanionProject".to_string(),
+            details: None,
+        })?;
+
+    let quota_tier = load_resp
+        .get("allowedTiers")
+        .and_then(Value::as_array)
+        .and_then(|tiers| tiers.get(0))
+        .and_then(|tier| tier.get("quotaTier"))
+        .and_then(Value::as_str)
+        .unwrap_or("<unknown>");
+
+    credential.project_id = project_id.to_string();
+    info!(
+        project_id = %project_id,
+        quota_tier = %quota_tier,
+        "loadCodeAssist resolved companion project id"
+    );
 
     state
         .handle
