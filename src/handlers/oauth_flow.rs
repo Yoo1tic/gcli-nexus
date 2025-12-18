@@ -154,20 +154,14 @@ async fn ensure_companion_project(
         });
     }
 
-    let tier = load_resp
-        .current_tier
-        .as_ref()
-        .and_then(|t| t.quota_tier)
-        .or_else(|| load_resp.allowed_tiers.first().and_then(|t| t.quota_tier))
-        .unwrap_or(UserTier::Standard)
-        .normalized();
+    let tier = load_resp.resolve_effective_tier();
 
     if let Some(existing_project_id) = load_resp.cloudaicompanion_project {
         return Ok((existing_project_id, tier));
     }
 
     info!("No existing companion project found, starting onboarding...");
-    let new_project_id = perform_onboarding(access_token, tier, client).await?;
+    let new_project_id = perform_onboarding(access_token, tier.clone(), client).await?;
 
     Ok((new_project_id, tier))
 }
@@ -208,7 +202,7 @@ async fn perform_onboarding(
     for attempt in 1..=MAX_ATTEMPTS {
         let resp_json = GoogleOauthService::onboard_code_assist_with_retry(
             access_token,
-            tier,
+            tier.clone(),
             None,
             client.clone(),
         )

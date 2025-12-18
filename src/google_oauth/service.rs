@@ -158,7 +158,7 @@ impl GoogleOauthService {
         (|| async {
             GoogleOauthEndpoints::onboard_code_assist(
                 access_token.as_ref(),
-                tier,
+                tier.clone(),
                 cloudaicompanion_project.clone(),
                 http_client.clone(),
             )

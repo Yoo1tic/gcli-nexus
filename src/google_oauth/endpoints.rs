@@ -37,7 +37,7 @@ struct OnboardMetadata {
     duet_project: Option<String>,
 }
 
-impl OnboardMetadata {
+impl Default for OnboardMetadata {
     fn default() -> Self {
         Self {
             ide_type: IDE_TYPE,

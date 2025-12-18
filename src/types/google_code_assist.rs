@@ -6,6 +6,8 @@ pub struct TierInfo {
     pub id: String,
     pub name: Option<String>,
     pub quota_tier: Option<UserTier>,
+    #[serde(default)]
+    pub is_default: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -25,6 +27,21 @@ pub struct LoadCodeAssistResponse {
     pub allowed_tiers: Vec<TierInfo>,
     #[serde(default)]
     pub ineligible_tiers: Vec<IneligibleReason>,
+}
+
+impl LoadCodeAssistResponse {
+    pub fn resolve_effective_tier(&self) -> UserTier {
+        self.current_tier
+            .as_ref()
+            .and_then(|t| t.quota_tier.clone())
+            .or_else(|| {
+                self.allowed_tiers
+                    .iter()
+                    .find(|t| t.is_default)
+                    .and_then(|t| t.quota_tier.clone())
+            })
+            .unwrap_or(UserTier::Legacy)
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -52,36 +69,44 @@ pub struct OnboardOperationResponse {
     pub response: Option<OnboardResultPayload>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
 pub enum UserTier {
-    #[serde(rename = "free-tier")]
     Free,
-
-    #[serde(rename = "legacy-tier")]
     Legacy,
-
-    #[serde(rename = "standard-tier")]
     Standard,
+    Other(String),
+}
 
-    #[serde(other)]
-    Unknown,
+impl From<String> for UserTier {
+    fn from(raw: String) -> Self {
+        match raw.as_str() {
+            "free-tier" => UserTier::Free,
+            "legacy-tier" => UserTier::Legacy,
+            "standard-tier" => UserTier::Standard,
+            other => UserTier::Other(other.to_string()),
+        }
+    }
+}
+
+impl From<UserTier> for String {
+    fn from(tier: UserTier) -> Self {
+        match tier {
+            UserTier::Free => "free-tier".to_string(),
+            UserTier::Legacy => "legacy-tier".to_string(),
+            UserTier::Standard => "standard-tier".to_string(),
+            UserTier::Other(value) => value,
+        }
+    }
 }
 
 impl UserTier {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             UserTier::Free => "free-tier",
             UserTier::Legacy => "legacy-tier",
             UserTier::Standard => "standard-tier",
-            UserTier::Unknown => "standard-tier",
-        }
-    }
-
-    /// Map unknown tiers to a safe default.
-    pub fn normalized(self) -> Self {
-        match self {
-            UserTier::Unknown => UserTier::Standard,
-            other => other,
+            UserTier::Other(value) => value.as_str(),
         }
     }
 }
