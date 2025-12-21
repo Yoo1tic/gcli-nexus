@@ -29,7 +29,14 @@ eventsource-stream = "0.2"
 figment = { version = "0.10", features = ["env"] }
 tokio-stream = "0.1.17"
 time = "0.3"
-governor = "0.10.4"
+governor = "0.10"
 
 [build-dependencies]
 dotenvy = "0.15"
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
