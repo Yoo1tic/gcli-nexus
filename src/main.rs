@@ -41,22 +41,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle_clone = handle.clone();
     if let Some(cred_path) = cfg.cred_path.as_ref() {
         tokio::spawn(async move {
-            info!(path = %cred_path.display(), "Background task: starting credential loading...");
-
             match gcli_nexus::service::credential_loader::load_from_dir(cred_path) {
                 Ok(files) if !files.is_empty() => {
-                    let count = files.len();
-                    info!(
-                        count,
-                        "Background task: files loaded from filesystem, submitting to actor..."
-                    );
-
                     handle_clone.submit_credentials(files).await;
-
-                    info!(
-                        count,
-                        "Background task: all credentials successfully submitted."
-                    );
                 }
                 Ok(_) => {
                     info!(

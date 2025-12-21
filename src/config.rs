@@ -50,10 +50,10 @@ pub struct Config {
     #[serde(deserialize_with = "deserialize_string_lax")]
     pub nexus_key: String,
 
-    /// Max concurrent Google OAuth refreshes processed by the worker.
-    /// Env: `REFRESH_CONCURRENCY`. Default: `10`.
+    /// OAuth refresh requests per second (TPS) for the refresh worker.
+    /// Env: `OAUTH_TPS`. Default: `5`.
     #[serde(default)]
-    pub refresh_concurrency: usize,
+    pub oauth_tps: usize,
 
     /// List of supported model names. Each name corresponds to a distinct credential queue.
     /// Env: `MODEL_LIST`. Example: `["gemini-pro", "gemini-1.5-flash"]`.
@@ -80,7 +80,7 @@ impl Default for Config {
             loglevel: "info".to_string(),
             proxy: None,
             nexus_key: "pwd".to_string(),
-            refresh_concurrency: 10,
+            oauth_tps: 5,
             model_list: vec!["gemini-2.5-pro".to_string()],
             cred_path: None,
             enable_multiplexing: false,

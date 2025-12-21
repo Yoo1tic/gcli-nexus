@@ -67,7 +67,7 @@ impl JobInstruction {
     }
 }
 
-// Refresh pipeline tuning moved to Config.refresh_concurrency.
+// Refresh pipeline tuning moved to Config.oauth_tps.
 pub struct RefreshJobService {
     job_tx: mpsc::Sender<JobInstruction>,
 }
@@ -99,9 +99,12 @@ impl RefreshJobService {
             .default_headers(headers)
             .build()
             .expect("FATAL: initialize refresh job HTTP client failed");
+        let oauth_tps = CONFIG.oauth_tps.max(1);
+        let oauth_tps_u32 = u32::try_from(oauth_tps).unwrap_or(u32::MAX);
+        let burst_u32 = u32::try_from(oauth_tps.saturating_mul(2)).unwrap_or(u32::MAX);
         let limiter = Arc::new(RateLimiter::direct(
-            Quota::per_minute(std::num::NonZeroU32::new(30).unwrap())
-                .allow_burst(std::num::NonZeroU32::new(10).unwrap()),
+            Quota::per_second(std::num::NonZeroU32::new(oauth_tps_u32).unwrap())
+                .allow_burst(std::num::NonZeroU32::new(burst_u32).unwrap()),
         ));
 
         let (job_tx, job_rx) = mpsc::channel::<JobInstruction>(1000);
@@ -109,11 +112,11 @@ impl RefreshJobService {
 
         // Spawn background refresh worker using buffer_unordered semantics.
         // Extra refresh requests will queue in the channel (unbounded).
-        let refresh_concurrency = CONFIG.refresh_concurrency.max(1);
+        let buffer_unordered = oauth_tps.saturating_mul(2).max(1);
         tokio::spawn(async move {
             info!(
-                "Refresh Pipeline Started: Concurrency={}, RateLimit=10/min",
-                refresh_concurrency
+                "Refresh Pipeline Started: BufferUnordered={}, RateLimit={}/s, Burst={}",
+                buffer_unordered, oauth_tps_u32, burst_u32
             );
 
             let mut pipeline = ReceiverStream::new(job_rx)
@@ -129,7 +132,7 @@ impl RefreshJobService {
                         }
                     }
                 })
-                .buffer_unordered(refresh_concurrency);
+                .buffer_unordered(buffer_unordered);
 
             while let Some(outcome) = pipeline.next().await {
                 if let Err(e) = handle.send_refresh_complete(outcome) {

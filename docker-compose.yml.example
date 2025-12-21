@@ -21,7 +21,7 @@ services:
 
       BIGMODEL_LIST: "[gemini-2.5-pro]"
 
-      REFRESH_CONCURRENCY: 10
+      OAUTH_TPS: 5
 
       # Optional outbound HTTP proxy (scheme://user:pass@host:port). Remove if unused.
       # PROXY="http://username:password@proxy.company.com:8080"

@@ -60,7 +60,7 @@
 | `LOGLEVEL`                           | No       | `info`             | Tracing level (`error`, `warn`, `info`, `debug`, `trace`). `RUST_LOG` still works as a fallback.                      |
 | `BIGMODEL_LIST`                      | No       | `[]`               | JSON array of model names treated as “big”. They get their own queue/cooldown bucket to avoid starving lighter chats. |
 | `CRED_PATH`                          | No       | unset              | Directory that is scanned once during startup for credential JSON; leave unset to rely purely on SQLite contents.     |
-| `REFRESH_CONCURRENCY`                | No       | `10`               | Number of concurrent Google refresh jobs buffered in the background worker.                                           |
+| `OAUTH_TPS`                          | No       | `10`               | OAuth refresh requests per second; refresh buffer/burst sizes are derived as `OAUTH_TPS * 2`.                          |
 | `ENABLE_MULTIPLEXING`                | No       | `false`            | Allow outbound reqwest clients to use HTTP/2 multiplexing; keep `false` to force HTTP/1-only behavior.                |
 | `PROXY`                              | No       | unset              | Outbound HTTP proxy applied to both the Gemini caller and the OAuth refresh client (supports HTTP/SOCKS).             |
 | `DATABASE_URL`, `PROXY`, `CRED_PATH` | —        | —                  | Accept absolute or relative paths; Figment merges `.env` values automatically.                                        |

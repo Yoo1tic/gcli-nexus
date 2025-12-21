@@ -26,10 +26,7 @@ pub fn load_from_dir(dir: &Path) -> io::Result<Vec<GoogleCredential>> {
         .filter_map(|(path, contents)| parse_json(&path, &contents).map(|value| (path, value)))
         .filter_map(
             |(path, value)| match GoogleCredential::from_payload(&value) {
-                Ok(c) => {
-                    info!(path = %path.display(), "loaded credential from file");
-                    Some(c)
-                }
+                Ok(c) => Some(c),
                 Err(e) => {
                     warn!(path = %path.display(), error = %e, "failed to normalize credential");
                     None
