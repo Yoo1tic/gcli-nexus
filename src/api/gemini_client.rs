@@ -24,10 +24,9 @@ struct CliPostFormatBody {
 impl GeminiClient {
     pub fn new(client: reqwest::Client) -> Self {
         let retry_policy = ExponentialBuilder::default()
-            .with_min_delay(Duration::from_millis(100))
-            .with_max_delay(Duration::from_secs(1))
-            .with_max_times(3)
-            .with_jitter();
+            .with_min_delay(Duration::from_millis(0))
+            .with_max_delay(Duration::from_millis(0))
+            .with_max_times(3);
         Self {
             client,
             retry_policy,

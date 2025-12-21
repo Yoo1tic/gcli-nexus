@@ -1,8 +1,11 @@
 use crate::google_oauth::credentials::GoogleCredential;
 use serde::Serialize;
-use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
-use std::time::{Duration, Instant};
+use std::{
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap, HashSet, VecDeque},
+    time::{Duration, Instant},
+};
+use tracing::{debug, info, warn};
 
 pub type CredentialId = i64;
 pub type QueueKey = String;
@@ -58,10 +61,9 @@ impl CredentialManager {
         for queue_key in all_keys {
             if let Some(set) = blacklist {
                 if set.contains(queue_key) {
-                    tracing::debug!(
+                    debug!(
                         "Skipping model {} for credential {} (unsupported)",
-                        queue_key,
-                        id
+                        queue_key, id
                     );
                     continue;
                 }
@@ -85,10 +87,9 @@ impl CredentialManager {
             .entry(id)
             .or_default()
             .insert(model.to_string());
-        tracing::warn!(
+        warn!(
             "Credential {} marked as unsupported for model {}",
-            id,
-            model
+            id, model
         );
     }
 
@@ -134,6 +135,18 @@ impl CredentialManager {
         let mut result = AssignmentResult::default();
 
         while let Some(id) = self.queues.get_mut(queue_key).and_then(|q| q.pop_front()) {
+            if self
+                .model_blacklist
+                .get(&id)
+                .map_or(false, |set| set.contains(queue_key))
+            {
+                debug!(
+                    "Skipping model {} for credential {} (unsupported)",
+                    queue_key, id
+                );
+                continue;
+            }
+
             let Some(cred) = Some(id)
                 .filter(|id| !self.refreshing.contains(id))
                 .filter(|id| !self.is_model_cooling(*id, queue_key))
@@ -148,7 +161,7 @@ impl CredentialManager {
                 .filter(|_| !cred.is_expired())
                 .cloned()
             else {
-                tracing::debug!(
+                debug!(
                     "Credential {} is unavailable (expired or missing token), scheduling refresh.",
                     id
                 );
@@ -186,10 +199,9 @@ impl CredentialManager {
                         .get_mut(&reclaimed_queue_key)
                         .map(|target_queue| {
                             target_queue.push_back(reclaimed_cred_id);
-                            tracing::info!(
+                            info!(
                                 "Reclaiming credential {} from cooldown for queue {}",
-                                reclaimed_cred_id,
-                                reclaimed_queue_key
+                                reclaimed_cred_id, reclaimed_queue_key
                             );
                         });
                 }
