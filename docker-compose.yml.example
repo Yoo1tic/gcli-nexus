@@ -23,6 +23,9 @@ services:
 
       OAUTH_TPS: 5
 
+      # Max retry attempts for Gemini CLI upstream calls.
+      GEMINI_RETRY_MAX_TIMES: 3
+
       # Optional outbound HTTP proxy (scheme://user:pass@host:port). Remove if unused.
       # PROXY="http://username:password@proxy.company.com:8080"
 

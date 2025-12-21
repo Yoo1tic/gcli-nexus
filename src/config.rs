@@ -69,6 +69,11 @@ pub struct Config {
     /// Env: `ENABLE_MULTIPLEXING`. Default: `false`.
     #[serde(default)]
     pub enable_multiplexing: bool,
+
+    /// Max retry attempts for Gemini CLI upstream calls.
+    /// Env: `GEMINI_RETRY_MAX_TIMES`. Default: `3`.
+    #[serde(default = "default_gemini_retry_max_times")]
+    pub gemini_retry_max_times: usize,
 }
 
 impl Default for Config {
@@ -84,6 +89,7 @@ impl Default for Config {
             model_list: vec!["gemini-2.5-pro".to_string()],
             cred_path: None,
             enable_multiplexing: false,
+            gemini_retry_max_times: default_gemini_retry_max_times(),
         }
     }
 }
@@ -199,4 +205,8 @@ pub fn default_listen_ip() -> IpAddr {
 /// Default port for the HTTP server.
 pub fn default_listen_port() -> u16 {
     8188
+}
+
+pub fn default_gemini_retry_max_times() -> usize {
+    3
 }

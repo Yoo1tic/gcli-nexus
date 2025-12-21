@@ -1,3 +1,4 @@
+use crate::config::CONFIG;
 use crate::error::{GeminiError, IsRetryable, NexusError};
 use crate::middleware::gemini_request::{GeminiContext, GeminiRequestBody};
 use crate::router::NexusState;
@@ -24,9 +25,9 @@ struct CliPostFormatBody {
 impl GeminiClient {
     pub fn new(client: reqwest::Client) -> Self {
         let retry_policy = ExponentialBuilder::default()
-            .with_min_delay(Duration::from_millis(0))
-            .with_max_delay(Duration::from_millis(0))
-            .with_max_times(3);
+            .with_min_delay(Duration::from_millis(100))
+            .with_max_delay(Duration::from_millis(300))
+            .with_max_times(CONFIG.gemini_retry_max_times);
         Self {
             client,
             retry_policy,
