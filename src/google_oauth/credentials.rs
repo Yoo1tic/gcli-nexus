@@ -1,6 +1,5 @@
 use crate::error::NexusError;
-use chrono::Duration;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 

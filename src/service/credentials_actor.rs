@@ -1,11 +1,10 @@
+use crate::config::CONFIG;
 use crate::error::NexusError;
 use crate::google_oauth::credentials::GoogleCredential;
-use crate::google_oauth::service::GoogleOauthService;
+use crate::google_oauth::refresh_job::{JobInstruction, RefreshJobService, RefreshOutcome};
 use crate::service::credential_manager::CredentialManager;
-pub use crate::service::credential_manager::{AssignedCredential, CredentialId};
+use crate::service::credential_manager::{AssignedCredential, CredentialId};
 use crate::service::credential_ops::CredentialOps;
-use crate::types::job::RefreshOutcome;
-use crate::{config::CONFIG, types::job::JobInstruction};
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -126,7 +125,7 @@ impl Actor for CredentialsActor {
         _myself: ActorRef<Self::Msg>,
         _arguments: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
-        let refresh_service = GoogleOauthService::new(CredentialsHandle {
+        let refresh_service = RefreshJobService::new(CredentialsHandle {
             actor: _myself.clone(),
         });
         let refresh_tx = refresh_service.job_tx();

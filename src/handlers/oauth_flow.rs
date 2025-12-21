@@ -1,11 +1,12 @@
-use crate::google_oauth::credentials::GoogleCredential;
-use crate::google_oauth::endpoints::GoogleOauthEndpoints;
-use crate::google_oauth::service::GoogleOauthService;
-use crate::google_oauth::utils::attach_email_from_id_token;
-use crate::types::google_code_assist::{
-    LoadCodeAssistResponse, OnboardOperationResponse, UserTier,
+use crate::{
+    NexusError,
+    google_oauth::{
+        credentials::GoogleCredential, endpoints::GoogleOauthEndpoints, ops::GoogleOauthOps,
+        utils::attach_email_from_id_token,
+    },
+    router::NexusState,
+    types::google_code_assist::{LoadCodeAssistResponse, OnboardOperationResponse, UserTier},
 };
-use crate::{NexusError, router::NexusState};
 use axum::{
     Json,
     extract::{Query, State},
@@ -134,7 +135,7 @@ async fn ensure_companion_project(
     client: &Client,
 ) -> Result<(String, UserTier), NexusError> {
     let load_json =
-        GoogleOauthService::load_code_assist_with_retry(access_token, client.clone()).await?;
+        GoogleOauthOps::load_code_assist_with_retry(access_token, client.clone()).await?;
     debug!(body = %load_json, "loadCodeAssist upstream body");
 
     let load_resp: LoadCodeAssistResponse =
@@ -188,7 +189,7 @@ async fn perform_onboarding(
     let mut last_resp: Option<serde_json::Value> = None;
 
     for attempt in 1..=MAX_ATTEMPTS {
-        let resp_json = GoogleOauthService::onboard_code_assist_with_retry(
+        let resp_json = GoogleOauthOps::onboard_code_assist_with_retry(
             access_token,
             tier.clone(),
             None,

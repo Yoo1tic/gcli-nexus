@@ -11,4 +11,4 @@ pub mod types;
 
 pub use error::NexusError;
 pub use google_oauth::credentials::GoogleCredential;
-pub use google_oauth::service::GoogleOauthService;
+pub use google_oauth::ops::GoogleOauthOps;

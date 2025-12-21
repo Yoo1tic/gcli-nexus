@@ -1,11 +1,12 @@
-use crate::config::{
-    GCLI_CLIENT_ID, GCLI_CLIENT_SECRET, GOOGLE_AUTH_URL, GOOGLE_TOKEN_URI, LOAD_CODE_ASSIST_URL,
-    OAUTH_CALLBACK_URL, ONBOARD_CODE_ASSIST_URL,
+use crate::{
+    config::{
+        GCLI_CLIENT_ID, GCLI_CLIENT_SECRET, GOOGLE_AUTH_URL, GOOGLE_TOKEN_URI,
+        LOAD_CODE_ASSIST_URL, OAUTH_CALLBACK_URL, ONBOARD_CODE_ASSIST_URL,
+    },
+    error::NexusError,
+    google_oauth::credentials::GoogleCredential,
+    types::google_code_assist::UserTier,
 };
-use crate::error::NexusError;
-use crate::google_oauth::credentials::GoogleCredential;
-use crate::types::google_code_assist::UserTier;
-
 use oauth2::{
     AuthUrl, AuthorizationCode, Client as OAuth2Client, ClientId, ClientSecret, CsrfToken,
     EndpointNotSet, EndpointSet, ExtraTokenFields, PkceCodeChallenge, PkceCodeVerifier,

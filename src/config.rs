@@ -1,4 +1,5 @@
 use axum_extra::extract::cookie::Key;
+use backon::ExponentialBuilder;
 use figment::{
     Figment,
     providers::{Env, Serialized},
@@ -11,6 +12,7 @@ use std::{
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
     sync::LazyLock,
+    time::Duration,
 };
 use url::Url;
 
@@ -124,6 +126,15 @@ where
 
 /// Global, lazily-initialized configuration instance.
 pub static CONFIG: LazyLock<Config> = LazyLock::new(Config::from_env);
+
+/// Default retry policy for Google OAuth operations.
+pub static OAUTH_RETRY_POLICY: LazyLock<ExponentialBuilder> = LazyLock::new(|| {
+    ExponentialBuilder::default()
+        .with_min_delay(Duration::from_secs(1))
+        .with_max_delay(Duration::from_secs(3))
+        .with_max_times(3)
+        .with_jitter()
+});
 
 /// Google OAuth endpoints (constants).
 pub static GOOGLE_AUTH_URL: LazyLock<Url> = LazyLock::new(|| {

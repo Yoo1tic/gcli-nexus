@@ -216,7 +216,7 @@ impl GeminiError {
                 let reset = reset_dt.with_timezone(&Utc);
                 let now = Utc::now();
                 let diff_secs = (reset - now).num_seconds();
-                (diff_secs > 0).then_some(diff_secs as u64)
+                (diff_secs > 0).then_some((diff_secs as u64).saturating_add(1))
             })
             .next()
     }
