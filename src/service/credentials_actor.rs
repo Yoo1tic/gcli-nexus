@@ -21,6 +21,11 @@ pub enum CredentialsActorMessage {
         cooldown: Duration,
         model_name: String,
     },
+    /// Report unsupported model (e.g. 400/404); record per-credential blacklist.
+    ReportModelUnsupported {
+        id: CredentialId,
+        model_name: String,
+    },
     /// Report invalid/expired access (e.g. 401/403); refresh then re-enqueue.
     ReportInvalid { id: CredentialId },
     /// Report a credential as banned/unusable; remove from queues and storage.
@@ -79,6 +84,14 @@ impl CredentialsHandle {
     /// Report invalid/expired (401/403); the actor will refresh before reuse.
     pub async fn report_invalid(&self, id: CredentialId) {
         let _ = ractor::cast!(self.actor, CredentialsActorMessage::ReportInvalid { id });
+    }
+
+    /// Report that a credential does not support a model (e.g. 400/404).
+    pub async fn report_model_unsupported(&self, id: CredentialId, model_name: String) {
+        let _ = ractor::cast!(
+            self.actor,
+            CredentialsActorMessage::ReportModelUnsupported { id, model_name }
+        );
     }
 
     /// Report a credential as permanently banned/unusable; remove it entirely.
@@ -182,6 +195,9 @@ impl Actor for CredentialsActor {
                 model_name,
             } => {
                 self.handle_report_rate_limit(state, id, cooldown, model_name);
+            }
+            CredentialsActorMessage::ReportModelUnsupported { id, model_name } => {
+                state.manager.mark_model_unsupported(id, &model_name);
             }
 
             CredentialsActorMessage::ReportInvalid { id } => {

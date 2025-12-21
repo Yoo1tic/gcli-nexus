@@ -30,6 +30,7 @@ pub struct CredentialManager {
     waiting_room: BinaryHeap<CooldownTicket>,
     cooldown_map: HashMap<(CredentialId, QueueKey), Instant>,
     refreshing: HashSet<CredentialId>,
+    model_blacklist: HashMap<CredentialId, HashSet<String>>,
 }
 
 impl CredentialManager {
@@ -40,15 +41,33 @@ impl CredentialManager {
             waiting_room: BinaryHeap::new(),
             cooldown_map: HashMap::new(),
             refreshing: HashSet::new(),
+            model_blacklist: HashMap::new(),
         }
     }
 
-    pub fn add_credential(&mut self, id: CredentialId, cred: GoogleCredential, tags: &[String]) {
+    pub fn add_credential(
+        &mut self,
+        id: CredentialId,
+        cred: GoogleCredential,
+        all_keys: &[String],
+    ) {
         self.creds.insert(id, cred);
         self.refreshing.remove(&id);
 
-        for tag in tags {
-            let queue = self.queues.entry(tag.clone()).or_default();
+        let blacklist = self.model_blacklist.get(&id);
+        for queue_key in all_keys {
+            if let Some(set) = blacklist {
+                if set.contains(queue_key) {
+                    tracing::debug!(
+                        "Skipping model {} for credential {} (unsupported)",
+                        queue_key,
+                        id
+                    );
+                    continue;
+                }
+            }
+
+            let queue = self.queues.entry(queue_key.clone()).or_default();
             if !queue.contains(&id) {
                 queue.push_back(id);
             }
@@ -60,10 +79,24 @@ impl CredentialManager {
         self.clear_cooldowns_for(id);
     }
 
+    pub fn mark_model_unsupported(&mut self, id: CredentialId, model: impl AsRef<str>) {
+        let model = model.as_ref();
+        self.model_blacklist
+            .entry(id)
+            .or_default()
+            .insert(model.to_string());
+        tracing::warn!(
+            "Credential {} marked as unsupported for model {}",
+            id,
+            model
+        );
+    }
+
     pub fn delete_credential(&mut self, id: CredentialId) {
         self.creds.remove(&id);
         self.refreshing.remove(&id);
         self.clear_cooldowns_for(id);
+        self.model_blacklist.remove(&id);
     }
 
     pub fn report_rate_limit(&mut self, id: CredentialId, queue_key: &str, cooldown: Duration) {

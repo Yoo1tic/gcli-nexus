@@ -232,13 +232,14 @@ impl IsRetryable for NexusError {
             NexusError::ReqwestError(_) => true,
             NexusError::GeminiServerError(e) => matches!(
                 e.error.status.as_str(),
-                "RESOURCE_EXHAUSTED" | "UNAUTHENTICATED" | "PERMISSION_DENIED"
+                "RESOURCE_EXHAUSTED" | "UNAUTHENTICATED" | "PERMISSION_DENIED" | "NOT_FOUND"
             ),
             NexusError::UpstreamStatus(status) => matches!(
                 *status,
                 reqwest::StatusCode::TOO_MANY_REQUESTS
                     | reqwest::StatusCode::UNAUTHORIZED
                     | reqwest::StatusCode::FORBIDDEN
+                    | reqwest::StatusCode::NOT_FOUND
             ),
             NexusError::Oauth2Server { .. } => false,
             NexusError::UnexpectedError(_) => false,

@@ -115,6 +115,16 @@ impl GeminiClient {
                                     info!("Project: {}, banned (parsed)", assigned.project_id);
                                 }
 
+                                "NOT_FOUND" if http_code == 404 => {
+                                    handle
+                                        .report_model_unsupported(assigned.id, ctx.model.clone())
+                                        .await;
+                                    info!(
+                                        "Project: {}, model {} unsupported (parsed)",
+                                        assigned.project_id, ctx.model
+                                    );
+                                }
+
                                 _ if http_code == 401 => {
                                     handle.report_invalid(assigned.id).await;
                                 }
@@ -151,6 +161,15 @@ impl GeminiClient {
                                 StatusCode::FORBIDDEN => {
                                     warn!(
                                         "Project: {}, 403 Forbidden (Raw/WAF), preserving credential. Body: {:.100}...",
+                                        assigned.project_id, raw_body
+                                    );
+                                }
+                                StatusCode::NOT_FOUND => {
+                                    handle
+                                        .report_model_unsupported(assigned.id, ctx.model.clone())
+                                        .await;
+                                    warn!(
+                                        "Project: {}, 404 Not Found (Fallback). Body: {:.100}...",
                                         assigned.project_id, raw_body
                                     );
                                 }
