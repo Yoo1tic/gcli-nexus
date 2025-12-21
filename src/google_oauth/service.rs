@@ -61,9 +61,10 @@ impl GoogleOauthService {
             .default_headers(headers)
             .build()
             .expect("FATAL: initialize GoogleOauthService HTTP client failed");
-        let limiter = Arc::new(RateLimiter::direct(Quota::per_minute(
-            std::num::NonZeroU32::new(10).unwrap(),
-        )));
+        let limiter = Arc::new(RateLimiter::direct(
+            Quota::per_minute(std::num::NonZeroU32::new(30).unwrap())
+                .allow_burst(std::num::NonZeroU32::new(10).unwrap()),
+        ));
 
         let (job_tx, job_rx) = mpsc::channel::<JobInstruction>(1000);
         let handle = handle.clone();

@@ -50,7 +50,9 @@ impl JobInstruction {
                     tracing::info!("Onboard: Found Project ID {}", existing_project_id);
                     cred.project_id = existing_project_id;
                 } else {
-                    tracing::warn!("Onboard: Response did not contain cloudaicompanion_project");
+                    return Err(NexusError::UnexpectedError(
+                        "Onboard: missing cloudaicompanion_project".to_string(),
+                    ));
                 }
             }
         }

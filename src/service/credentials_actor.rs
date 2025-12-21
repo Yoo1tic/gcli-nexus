@@ -320,22 +320,20 @@ impl CredentialsActor {
         let count = creds_vec.len();
         info!(count, "Batch submit received, dispatching...");
         let refresh_tx = state.refresh_tx.clone();
-
-        for cred in creds_vec.into_iter() {
-            let pid = cred.project_id.clone();
-            let refresh_tx = refresh_tx.clone();
-
-            tokio::spawn(async move {
+        tokio::spawn(async move {
+            for cred in creds_vec {
+                let pid = cred.project_id.clone();
                 if let Err(e) = refresh_tx.send(JobInstruction::Onboard { cred }).await {
                     warn!(
                         "Project: {pid}, failed to enqueue onboarding refresh: {}",
                         e
                     );
-                    return;
+                    break;
                 }
-            });
-        }
+            }
+        });
     }
+
     async fn handle_refresh_complete(
         &self,
         state: &mut CredentialsActorState,
