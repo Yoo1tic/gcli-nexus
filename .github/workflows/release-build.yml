@@ -24,14 +24,29 @@ jobs:
             runner: ubuntu-latest
             artifact_name: pollux
             release_name: pollux-linux-x86_64
-          # NOTE: Disabled for private repos; ubuntu-24.04-arm is not supported yet.
-          # - target: aarch64
-          #   target_triple: aarch64-unknown-linux-gnu
-          #   runner: ubuntu-24.04-arm
-          #   artifact_name: pollux
-          #   release_name: pollux-linux-aarch64
+          - target: aarch64
+            target_triple: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            artifact_name: pollux
+            release_name: pollux-linux-aarch64
+          - target: x86_64
+            target_triple: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            artifact_name: pollux
+            release_name: pollux-linux-musl-x86_64
+          - target: aarch64
+            target_triple: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            artifact_name: pollux
+            release_name: pollux-linux-musl-aarch64
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Musl Tools
+        if: contains(matrix.target_triple, 'musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
 
       - name: Add Rust target
         run: |

@@ -4,6 +4,13 @@ on:
   push:
     tags: ["v*"]
     branches: ["main"]
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE"
+      - "**/*.png"
+      - "**/*.jpg"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
 
 env:
   REGISTRY: ghcr.io
@@ -19,10 +26,9 @@ jobs:
           - runner: ubuntu-latest
             arch: amd64
             platform: linux/amd64
-          # NOTE: Disabled for private repos; ubuntu-24.04-arm is not supported yet.
-          # - runner: ubuntu-24.04-arm
-          #   arch: arm64
-          #   platform: linux/arm64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            platform: linux/arm64
 
     permissions:
       contents: read
