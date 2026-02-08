@@ -8,7 +8,7 @@ use crate::server::routes::{codex, geminicli};
 
 use axum::{
     Router,
-    extract::{DefaultBodyLimit, FromRef, Request},
+    extract::{FromRef, Request},
     http::{HeaderName, StatusCode, Version, header::USER_AGENT},
     middleware::{self, Next},
     response::Response,
@@ -226,7 +226,5 @@ pub fn pollux_router(state: PolluxState) -> Router {
         .merge(codex)
         .fallback(not_found_handler)
         .with_state(state)
-        // Set DefaultBodyLimit to 30 MiB for all routes
-        .layer(DefaultBodyLimit::max(30 * 1024 * 1024))
         .layer(middleware::from_fn(access_log))
 }

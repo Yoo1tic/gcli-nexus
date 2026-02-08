@@ -119,7 +119,7 @@ async fn codex_response_route_rejects_bad_requests_and_requires_key() {
         r#"{"error":{"code":"NO_CREDENTIAL","message":"No available credentials to process the request.","type":"NO_CREDENTIAL"}}"#
     );
 
-    // 5) correct key + oversized JSON body -> 413
+    // 5) correct key + 30 MiB JSON body -> 503 (Codex endpoint limit is higher than 30 MiB)
     let oversized_input = "a".repeat(30 * 1024 * 1024 + 1024);
     let oversized_payload = format!(r#"{{"model":"{model}","input":"{oversized_input}"}}"#);
     let resp = app
@@ -135,14 +135,16 @@ async fn codex_response_route_rejects_bad_requests_and_requires_key() {
         )
         .await
         .expect("request failed");
-    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
 
     let body = to_bytes(resp.into_body(), usize::MAX)
         .await
         .expect("failed to read response body");
     let body_str = std::str::from_utf8(&body).expect("response body was not utf-8");
-    assert!(body_str.contains(r#""code":"PAYLOAD_TOO_LARGE""#));
-    assert!(body_str.contains(r#""message":"request body too large""#));
+    assert_eq!(
+        body_str,
+        r#"{"error":{"code":"NO_CREDENTIAL","message":"No available credentials to process the request.","type":"NO_CREDENTIAL"}}"#
+    );
 
     // 6) GET /codex/v1/models: no key -> 401
     let resp = app
