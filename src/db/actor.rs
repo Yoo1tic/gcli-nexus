@@ -1,4 +1,4 @@
-use crate::db::models::{DbCodexResource, DbGeminiCliResource};
+use crate::db::models::{DbAntigravityResource, DbCodexResource, DbGeminiCliResource};
 use crate::db::patch::{ProviderCreate, ProviderPatch};
 use crate::db::schema::SQLITE_INIT;
 use crate::db::traits::DbPatchable;
@@ -23,6 +23,9 @@ pub enum DbActorMessage {
 
     /// List active Codex keys (status=1).
     ListActiveCodex(RpcReplyPort<Result<Vec<DbCodexResource>, PolluxError>>),
+
+    /// List active Antigravity credentials (status=1).
+    ListActiveAntigravity(RpcReplyPort<Result<Vec<DbAntigravityResource>, PolluxError>>),
 
     /// Get Codex key by id.
     GetCodexById(i64, RpcReplyPort<Result<DbCodexResource, PolluxError>>),
@@ -53,6 +56,12 @@ impl DbActorHandle {
     pub async fn list_active_codex(&self) -> Result<Vec<DbCodexResource>, PolluxError> {
         ractor::call!(self.actor, DbActorMessage::ListActiveCodex).map_err(|e| {
             PolluxError::RactorError(format!("DbActor ListActiveCodex RPC failed: {e}"))
+        })?
+    }
+
+    pub async fn list_active_antigravity(&self) -> Result<Vec<DbAntigravityResource>, PolluxError> {
+        ractor::call!(self.actor, DbActorMessage::ListActiveAntigravity).map_err(|e| {
+            PolluxError::RactorError(format!("DbActor ListActiveAntigravity RPC failed: {e}"))
         })?
     }
 
@@ -121,6 +130,10 @@ impl Actor for DbActor {
             }
             DbActorMessage::ListActiveCodex(reply) => {
                 let res = self.list_active_codex(&state.pool).await;
+                let _ = reply.send(res);
+            }
+            DbActorMessage::ListActiveAntigravity(reply) => {
+                let res = self.list_active_antigravity(&state.pool).await;
                 let _ = reply.send(res);
             }
             DbActorMessage::GetCodexById(id, reply) => {
@@ -205,6 +218,42 @@ impl DbActor {
 
                 Ok(id)
             }
+
+            ProviderCreate::Antigravity(c) => {
+                let now = Utc::now();
+                let sub = c
+                    .sub
+                    .unwrap_or_else(|| synthetic_sub_from_refresh_token(&c.refresh_token));
+
+                let id: i64 = sqlx::query_scalar(
+                    r#"
+                INSERT INTO antigravity (
+                    email, sub, project_id, refresh_token, access_token, expiry, status, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                ON CONFLICT(sub, project_id) DO UPDATE SET
+                    email=excluded.email,
+                    refresh_token=excluded.refresh_token,
+                    access_token=excluded.access_token,
+                    expiry=excluded.expiry,
+                    status=1,
+                    updated_at=excluded.updated_at
+                RETURNING id
+                "#,
+                )
+                .bind(c.email)
+                .bind(sub)
+                .bind(c.project_id)
+                .bind(c.refresh_token)
+                .bind(c.access_token)
+                .bind(c.expiry)
+                .bind(now)
+                .bind(now)
+                .fetch_one(pool)
+                .await?;
+
+                Ok(id)
+            }
         }
     }
 
@@ -244,6 +293,24 @@ impl DbActor {
         Ok(rows)
     }
 
+    async fn list_active_antigravity(
+        &self,
+        pool: &SqlitePool,
+    ) -> Result<Vec<DbAntigravityResource>, PolluxError> {
+        let rows = sqlx::query_as::<_, DbAntigravityResource>(
+            r#"
+        SELECT id, email, sub, project_id, refresh_token, access_token, expiry, status, created_at, updated_at
+        FROM antigravity
+        WHERE status = 1
+        ORDER BY id
+        "#,
+        )
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows)
+    }
+
     async fn get_codex_by_id(
         &self,
         pool: &SqlitePool,
@@ -262,6 +329,15 @@ impl DbActor {
 
         Ok(row)
     }
+}
+
+fn synthetic_sub_from_refresh_token(refresh_token: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut h = DefaultHasher::new();
+    refresh_token.hash(&mut h);
+    format!("rt_hash:{:016x}", h.finish())
 }
 
 /// Spawn the database actor and return a cloneable handle.

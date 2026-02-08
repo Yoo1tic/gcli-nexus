@@ -82,5 +82,13 @@ fn collect_global_model_names(cfg: &Config) -> Vec<String> {
         }
     }
 
+    // Provider: antigravity
+    let antigravity = cfg.antigravity();
+    for name in antigravity.model_list {
+        if seen.insert(name.clone()) {
+            out.push(name);
+        }
+    }
+
     out
 }

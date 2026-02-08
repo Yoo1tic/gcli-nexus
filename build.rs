@@ -4,11 +4,12 @@ fn main() {
     dotenvy::dotenv().ok();
     println!("cargo:rerun-if-changed=.env");
 
-    ["SQLX_OFFLINE"]
+    ["SQLX_OFFLINE", "CLAUDE_SYSTEM_PREAMBLE"]
         .into_iter()
-        .filter_map(|key| env::var(key).ok().map(|val| (key, val)))
-        .for_each(|(key, val)| {
-            println!("cargo:rustc-env={}={}", key, val);
+        .for_each(|key| {
             println!("cargo:rerun-if-env-changed={}", key);
+            if let Ok(val) = env::var(key) {
+                println!("cargo:rustc-env={}={}", key, val);
+            }
         });
 }

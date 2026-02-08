@@ -28,6 +28,7 @@ url = { version = "2.5", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls", "stream"] }
 base64 = "0.22"
 rand = "0.9"
+uuid = { version = "1", features = ["v4"] }
 oauth2 = "5.0"
 thiserror = "2.0"
 tracing = "0.1"

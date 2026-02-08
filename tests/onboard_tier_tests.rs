@@ -11,7 +11,7 @@ fn enabled_response_json() -> serde_json::Value {
         "allowedTiers": [
             { "id": "standard-tier", "isDefault": true, "quotaTier": "standard-tier" }
         ],
-        "cloudaicompanionProject": "evident-segment-4tq63"
+        "cloudaicompanionProject": "test-project"
     })
 }
 
@@ -37,7 +37,7 @@ fn reads_project_id_and_tier_from_current_tier() {
     let resp: LoadCodeAssistResponse = serde_json::from_value(raw).expect("parse enabled json");
     assert_eq!(
         resp.cloudaicompanion_project.as_deref(),
-        Some("evident-segment-4tq63")
+        Some("test-project")
     );
     assert_eq!(resp.resolve_effective_tier(), UserTier::Standard);
 }

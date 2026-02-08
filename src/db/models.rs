@@ -30,3 +30,18 @@ pub struct DbCodexResource {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, FromRow)]
+pub struct DbAntigravityResource {
+    pub id: i64,
+    pub email: Option<String>,
+    /// Stable unique key (real subject if available, otherwise synthetic).
+    pub sub: String,
+    pub project_id: String,
+    pub refresh_token: String,
+    pub access_token: Option<String>,
+    pub expiry: DateTime<Utc>,
+    pub status: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}

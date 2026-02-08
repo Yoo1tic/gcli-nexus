@@ -4,6 +4,7 @@
 /// SQLite schema includes:
 /// - `gemini_cli` table (Gemini CLI provider, one (sub, project_id) per row)
 /// - `codex` table (Codex provider, one (sub, account_id) per row)
+/// - `antigravity` table (Antigravity provider, one (sub, project_id) per row)
 pub const SQLITE_INIT: &str = r#"
 -- ---------------------------------------------------------------------------
 -- Gemini CLI provider
@@ -43,4 +44,23 @@ CREATE TABLE IF NOT EXISTS codex (
 );
 
 CREATE INDEX IF NOT EXISTS idx_codex_status ON codex(status);
+
+-- ---------------------------------------------------------------------------
+-- Antigravity provider (one (sub, project_id) per row)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS antigravity (
+    id INTEGER PRIMARY KEY NOT NULL,
+    email TEXT NULL,
+    sub TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    access_token TEXT NULL,
+    expiry TEXT NOT NULL, -- RFC3339
+    status INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL, -- RFC3339
+    updated_at TEXT NOT NULL, -- RFC3339
+    UNIQUE(sub, project_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_antigravity_status ON antigravity(status);
 "#;

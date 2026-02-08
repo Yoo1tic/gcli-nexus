@@ -45,12 +45,24 @@ pub struct CodexPatch {
     pub status: Option<bool>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AntigravityPatch {
+    /// `None` => do not change; `Some(v)` => update
+    pub email: Option<String>,
+    pub refresh_token: Option<String>,
+    /// `None` => do not change; `Some(v)` => update
+    pub access_token: Option<String>,
+    pub expiry: Option<DateTime<Utc>>,
+    pub status: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderPatch {
     GeminiCli { id: u64, patch: GeminiCliPatch },
     Codex { id: u64, patch: CodexPatch },
+    Antigravity { id: u64, patch: AntigravityPatch },
 }
 
 impl ProviderPatch {
@@ -58,6 +70,7 @@ impl ProviderPatch {
         match self {
             ProviderPatch::GeminiCli { id, .. } => *id,
             ProviderPatch::Codex { id, .. } => *id,
+            ProviderPatch::Antigravity { id, .. } => *id,
         }
     }
 }

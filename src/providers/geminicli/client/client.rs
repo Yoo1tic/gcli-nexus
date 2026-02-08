@@ -3,7 +3,7 @@ use crate::error::{GeminiCliError, GeminiCliErrorBody, IsRetryable};
 use crate::providers::geminicli::{GeminiCliActorHandle, GeminiContext};
 use crate::providers::policy::classify_upstream_error;
 use backon::{ExponentialBuilder, Retryable};
-use pollux_schema::gemini::GeminiRequestBody;
+use pollux_schema::gemini::GeminiGenerateContentRequest;
 use serde::Serialize;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -19,7 +19,7 @@ pub struct GeminiClient {
 struct CliPostFormatBody {
     model: String,
     project: String,
-    request: GeminiRequestBody,
+    request: GeminiGenerateContentRequest,
 }
 
 impl GeminiClient {
@@ -39,7 +39,7 @@ impl GeminiClient {
         &self,
         handle: &GeminiCliActorHandle,
         ctx: &GeminiContext,
-        body: &GeminiRequestBody,
+        body: &GeminiGenerateContentRequest,
     ) -> Result<reqwest::Response, GeminiCliError> {
         let base_payload = CliPostFormatBody {
             model: ctx.model.clone(),

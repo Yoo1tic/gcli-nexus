@@ -1,10 +1,14 @@
 use crate::providers::Providers;
+use crate::providers::antigravity::ANTIGRAVITY_USER_AGENT;
 use crate::providers::codex::CODEX_USER_AGENT;
 use crate::providers::geminicli::GEMINICLI_USER_AGENT;
 use crate::server::guards::auth::RequireKeyAuth;
+use crate::server::routes::antigravity::oauth::{
+    antigravity_oauth_callback_root, antigravity_oauth_entry,
+};
 use crate::server::routes::codex::oauth::{codex_oauth_callback, codex_oauth_entry};
 use crate::server::routes::geminicli::oauth::{google_oauth_callback, google_oauth_entry};
-use crate::server::routes::{codex, geminicli};
+use crate::server::routes::{antigravity, codex, geminicli};
 
 use axum::{
     Router,
@@ -51,6 +55,7 @@ pub struct PolluxState {
     pub providers: Providers,
     pub client: reqwest::Client,
     pub codex_client: reqwest::Client,
+    pub antigravity_client: reqwest::Client,
     pub pollux_key: Arc<str>,
     pub insecure_cookie: bool,
 }
@@ -59,6 +64,7 @@ impl PolluxState {
     pub fn new(providers: Providers, pollux_key: Arc<str>, insecure_cookie: bool) -> Self {
         let geminicli_cfg = providers.geminicli_cfg.clone();
         let codex_cfg = providers.codex_cfg.clone();
+        let antigravity_cfg = providers.antigravity_cfg.clone();
 
         fn build_client(
             user_agent: &str,
@@ -105,11 +111,17 @@ impl PolluxState {
             codex_cfg.proxy.clone(),
             codex_cfg.enable_multiplexing,
         );
+        let antigravity_client = build_client(
+            ANTIGRAVITY_USER_AGENT,
+            antigravity_cfg.proxy.clone(),
+            antigravity_cfg.enable_multiplexing,
+        );
 
         Self {
             providers,
             client,
             codex_client,
+            antigravity_client,
             pollux_key,
             insecure_cookie,
         }
@@ -211,19 +223,28 @@ pub fn pollux_router(state: PolluxState) -> Router {
         state.clone(),
     ));
 
+    let antigravity = antigravity::router()
+        .layer(middleware::from_extractor_with_state::<RequireKeyAuth, _>(
+            state.clone(),
+        ));
+
     let oauth = Router::new()
         // Oauth Redirect path
         .route("/geminicli/auth", get(google_oauth_entry))
         .route("/codex/auth", get(codex_oauth_entry))
+        .route("/antigravity/auth", get(antigravity_oauth_entry))
         // GeminiCli Callback paths
         .route("/oauth2callback", get(google_oauth_callback))
         // Codex Callback paths
-        .route("/auth/callback", get(codex_oauth_callback));
+        .route("/auth/callback", get(codex_oauth_callback))
+        // Antigravity callback path (guarded)
+        .route("/", get(antigravity_oauth_callback_root));
 
     Router::new()
         .merge(oauth)
         .merge(gemini)
         .merge(codex)
+        .merge(antigravity)
         .fallback(not_found_handler)
         .with_state(state)
         .layer(middleware::from_fn(access_log))

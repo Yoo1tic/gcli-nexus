@@ -5,10 +5,10 @@ use axum::{
     extract::{FromRequest, Path, Request},
     http::StatusCode,
 };
-use pollux_schema::gemini::GeminiRequestBody;
+use pollux_schema::gemini::GeminiGenerateContentRequest;
 use tracing::warn;
 
-pub struct GeminiPreprocess(pub GeminiRequestBody, pub GeminiContext);
+pub struct GeminiPreprocess(pub GeminiGenerateContentRequest, pub GeminiContext);
 
 impl<S> FromRequest<S> for GeminiPreprocess
 where
@@ -65,7 +65,7 @@ where
 
         let stream = path.contains("streamGenerateContent");
 
-        let Json(body) = Json::<GeminiRequestBody>::from_request(req, &()).await?;
+        let Json(body) = Json::<GeminiGenerateContentRequest>::from_request(req, &()).await?;
 
         let ctx = GeminiContext {
             model,

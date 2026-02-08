@@ -3,7 +3,8 @@ mod providers;
 
 pub use basic::BasicConfig;
 pub use providers::{
-    CodexConfig, CodexResolvedConfig, GeminiCliConfig, GeminiCliResolvedConfig, ProviderDefaults,
+    AntigravityConfig, AntigravityResolvedConfig, CLAUDE_SYSTEM_PREAMBLE, CodexConfig,
+    CodexResolvedConfig, GeminiCliConfig, GeminiCliResolvedConfig, ProviderDefaults,
     ProvidersConfig,
 };
 
@@ -73,6 +74,10 @@ impl Config {
 
     pub fn codex(&self) -> CodexResolvedConfig {
         self.providers.codex.resolve(&self.providers.defaults)
+    }
+
+    pub fn antigravity(&self) -> AntigravityResolvedConfig {
+        self.providers.antigravity.resolve(&self.providers.defaults)
     }
 }
 

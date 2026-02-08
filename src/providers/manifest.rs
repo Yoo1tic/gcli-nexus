@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum ProviderKind {
     GeminiCli,
     Codex,
+    Antigravity,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,11 +33,20 @@ pub struct CodexProfile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AntigravityProfile {
+    pub refresh_token: String,
+    pub project_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileInner {
     GeminiCli(GeminiCliProfile),
     Codex(CodexProfile),
+    Antigravity(AntigravityProfile),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,11 +69,19 @@ pub struct CodexLease {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AntigravityLease {
+    pub id: u64,
+    pub access_token: String,
+    pub project_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderLease {
     GeminiCli(GeminiCliLease),
     Codex(CodexLease),
+    Antigravity(AntigravityLease),
 }
 
 impl ProviderLease {
@@ -71,6 +89,7 @@ impl ProviderLease {
         match self {
             ProviderLease::GeminiCli(_) => ProviderKind::GeminiCli,
             ProviderLease::Codex(_) => ProviderKind::Codex,
+            ProviderLease::Antigravity(_) => ProviderKind::Antigravity,
         }
     }
 
@@ -78,6 +97,7 @@ impl ProviderLease {
         match self {
             ProviderLease::GeminiCli(l) => l.id,
             ProviderLease::Codex(l) => l.id,
+            ProviderLease::Antigravity(l) => l.id,
         }
     }
 }

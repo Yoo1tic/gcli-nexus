@@ -1,6 +1,8 @@
+mod antigravity;
 mod codex;
 mod geminicli;
 
+pub use antigravity::{AntigravityConfig, AntigravityResolvedConfig, CLAUDE_SYSTEM_PREAMBLE};
 pub use codex::{CodexConfig, CodexResolvedConfig};
 pub use geminicli::{GeminiCliConfig, GeminiCliResolvedConfig};
 
@@ -50,6 +52,10 @@ pub struct ProvidersConfig {
     /// Codex passthrough provider configuration.
     #[serde(default)]
     pub codex: CodexConfig,
+
+    /// Antigravity provider configuration.
+    #[serde(default)]
+    pub antigravity: AntigravityConfig,
 }
 
 fn default_enable_multiplexing() -> bool {

@@ -12,9 +12,10 @@ pub mod traits;
 
 mod patch_impl;
 
-pub use models::{DbCodexResource, DbGeminiCliResource};
+pub use models::{DbAntigravityResource, DbCodexResource, DbGeminiCliResource};
 pub use patch::{
-    CodexCreate, CodexPatch, GeminiCliCreate, GeminiCliPatch, ProviderCreate, ProviderPatch,
+    AntigravityCreate, AntigravityPatch, CodexCreate, CodexPatch, GeminiCliCreate, GeminiCliPatch,
+    ProviderCreate, ProviderPatch,
 };
 pub use schema::SQLITE_INIT;
 

@@ -8,7 +8,7 @@ use sqlx::SqlitePool;
 use tracing::debug;
 
 use crate::error::PolluxError;
-use crate::patches::{CodexPatch, DbPatchable, GeminiCliPatch, ProviderPatch};
+use crate::patches::{AntigravityPatch, CodexPatch, DbPatchable, GeminiCliPatch, ProviderPatch};
 
 #[async_trait]
 impl DbPatchable for ProviderPatch {
@@ -155,6 +155,73 @@ impl DbPatchable for ProviderPatch {
                 if affected == 0 {
                     return Err(PolluxError::UnexpectedError(format!(
                         "Codex key not found for id={id} (create first)"
+                    )));
+                }
+
+                Ok(())
+            }
+
+            ProviderPatch::Antigravity { id, patch } => {
+                let id = i64::try_from(*id).map_err(|_| {
+                    PolluxError::UnexpectedError(format!("Invalid Antigravity id {id}"))
+                })?;
+
+                let AntigravityPatch {
+                    email,
+                    refresh_token,
+                    access_token,
+                    expiry,
+                    status,
+                } = patch.clone();
+
+                let email_set = email.is_some();
+                let refresh_token_set = refresh_token.is_some();
+                let access_token_set = access_token.is_some();
+                let expiry_set = expiry.is_some();
+                let status_set = status.is_some();
+                let updated_at = Utc::now();
+
+                // Use bind query API to avoid SQLx offline cache requirements.
+                let res = sqlx::query(
+                    r#"
+                    UPDATE antigravity
+                    SET
+                        email = COALESCE(?, email),
+                        refresh_token = COALESCE(?, refresh_token),
+                        access_token = COALESCE(?, access_token),
+                        expiry = COALESCE(?, expiry),
+                        status = COALESCE(?, status),
+                        updated_at = ?
+                    WHERE id = ?
+                    "#,
+                )
+                .bind(email)
+                .bind(refresh_token)
+                .bind(access_token)
+                .bind(expiry)
+                .bind(status)
+                .bind(updated_at)
+                .bind(id)
+                .execute(pool)
+                .await?;
+
+                let affected = res.rows_affected();
+                debug!(
+                    provider = "antigravity",
+                    id,
+                    affected,
+                    updated_at = %updated_at,
+                    email_set,
+                    refresh_token_set,
+                    access_token_set,
+                    expiry_set,
+                    status_set,
+                    "db patch applied"
+                );
+
+                if affected == 0 {
+                    return Err(PolluxError::UnexpectedError(format!(
+                        "Antigravity credential not found for id={id}"
                     )));
                 }
 
