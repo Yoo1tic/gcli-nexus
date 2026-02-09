@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-use content::{Content, Part};
+pub use content::{Content, Part};
 use generation::GenerationConfig;
 use system_instruction::deserialize_system_instruction;
 pub use tool::Tool;
@@ -57,6 +57,16 @@ pub struct GeminiGenerateContentRequest {
     /// `safetySettings` and `cachedContent`.
     #[serde(default, flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+impl GeminiGenerateContentRequest {
+    /// Mutable access to normalized `systemInstruction` content.
+    ///
+    /// Normalization is handled during deserialization: role is dropped,
+    /// text parts are merged, and empty/non-text instructions become `None`.
+    pub fn system_instruction_mut(&mut self) -> &mut Option<Content> {
+        &mut self.system_instruction
+    }
 }
 
 #[cfg(test)]

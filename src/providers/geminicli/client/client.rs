@@ -3,8 +3,7 @@ use crate::error::{GeminiCliError, GeminiCliErrorBody, IsRetryable};
 use crate::providers::geminicli::{GeminiCliActorHandle, GeminiContext};
 use crate::providers::policy::classify_upstream_error;
 use backon::{ExponentialBuilder, Retryable};
-use pollux_schema::gemini::GeminiGenerateContentRequest;
-use serde::Serialize;
+use pollux_schema::{gemini::GeminiGenerateContentRequest, geminicli::GeminiCliRequestMeta};
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
@@ -13,13 +12,6 @@ use super::api::GeminiApi;
 pub struct GeminiClient {
     client: reqwest::Client,
     retry_policy: ExponentialBuilder,
-}
-
-#[derive(Clone, Serialize)]
-struct CliPostFormatBody {
-    model: String,
-    project: String,
-    request: GeminiGenerateContentRequest,
 }
 
 impl GeminiClient {
@@ -41,11 +33,9 @@ impl GeminiClient {
         ctx: &GeminiContext,
         body: &GeminiGenerateContentRequest,
     ) -> Result<reqwest::Response, GeminiCliError> {
-        let base_payload = CliPostFormatBody {
-            model: ctx.model.clone(),
-            project: String::new(),
-            request: body.clone(),
-        };
+        let base_request = body.clone();
+        let model = ctx.model.clone();
+        let model_mask = ctx.model_mask;
 
         let handle = handle.clone();
         let client = self.client.clone();
@@ -53,15 +43,16 @@ impl GeminiClient {
         let retry_policy_inner = self.retry_policy;
 
         let op = {
-            let base_payload = base_payload.clone();
+            let base_request = base_request.clone();
             move || {
                 let handle = handle.clone();
                 let client = client.clone();
-                let base_payload = base_payload.clone();
+                let base_request = base_request.clone();
+                let model = model.clone();
                 async move {
                     let start = Instant::now();
                     let assigned = handle
-                        .get_credential(ctx.model_mask)
+                        .get_credential(model_mask)
                         .await?
                         .ok_or(GeminiCliError::NoAvailableCredential)?;
 
@@ -70,17 +61,20 @@ impl GeminiClient {
                         channel = "geminicli",
                         lease.id = assigned.id,
                         lease.waited_us = actor_took.as_micros() as u64,
-                        req.model = %ctx.model,
+                        req.model = %model,
                         req.stream = stream,
 
                         "[GeminiCli] [ID: {}] [{:?}] Post responses -> {}",
                         assigned.id,
                         actor_took,
-                        ctx.model
+                        model.as_str()
                     );
 
-                    let mut payload = base_payload.clone();
-                    payload.project = assigned.project_id.clone();
+                    let payload = GeminiCliRequestMeta {
+                        model: model.clone(),
+                        project: assigned.project_id.clone(),
+                    }
+                    .into_request(base_request.clone());
 
                     let resp = GeminiApi::try_post_cli(
                         client.clone(),
@@ -106,7 +100,7 @@ impl GeminiClient {
                         match &action {
                             crate::providers::ActionForError::RateLimit(duration) => {
                                 handle
-                                    .report_rate_limit(assigned.id, ctx.model_mask, *duration)
+                                    .report_rate_limit(assigned.id, model_mask, *duration)
                                     .await;
                                 info!(
                                     "Project: {}, rate limited, retry in {:?}",
@@ -119,7 +113,7 @@ impl GeminiClient {
                             }
                             crate::providers::ActionForError::ModelUnsupported => {
                                 handle
-                                    .report_model_unsupported(assigned.id, ctx.model_mask)
+                                    .report_model_unsupported(assigned.id, model_mask)
                                     .await;
                                 info!("Project: {}, model unsupported", assigned.project_id);
                             }
@@ -134,7 +128,7 @@ impl GeminiClient {
                             GeminiCliError::UpstreamMappedError { status, .. } => {
                                 warn!(
                                     lease_id = assigned.id,
-                                    model = %ctx.model,
+                                    model = %model,
                                     status = %status,
                                     action = ?action,
                                     "[GeminiCli] Upstream mapped error"
@@ -143,7 +137,7 @@ impl GeminiClient {
                             GeminiCliError::UpstreamFallbackError { status, .. } => {
                                 warn!(
                                     lease_id = assigned.id,
-                                    model = %ctx.model,
+                                    model = %model,
                                     status = %status,
                                     action = ?action,
                                     "[GeminiCli] Upstream fallback error"
@@ -152,7 +146,7 @@ impl GeminiClient {
                             GeminiCliError::Reqwest(error) => {
                                 warn!(
                                     lease_id = assigned.id,
-                                    model = %ctx.model,
+                                    model = %model,
                                     status = ?error.status(),
                                     action = ?action,
                                     "[GeminiCli] Upstream reqwest error"
@@ -161,7 +155,7 @@ impl GeminiClient {
                             _ => {
                                 warn!(
                                     lease_id = assigned.id,
-                                    model = %ctx.model,
+                                    model = %model,
                                     status = "N/A",
                                     action = ?action,
                                     "[GeminiCli] Upstream other error"

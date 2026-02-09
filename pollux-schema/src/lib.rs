@@ -6,5 +6,5 @@ pub mod openai;
 
 pub use antigravity::{AntigravityRequestBody, AntigravityRequestMeta};
 pub use codex::{CodexErrorBody, CodexRequestBody};
-pub use geminicli::GeminiCliResponseBody;
+pub use geminicli::{GeminiCliRequest, GeminiCliRequestMeta, GeminiCliResponseBody};
 pub use openai::{OpenaiRequestBody, OpenaiResponsesErrorBody, OpenaiResponsesErrorObject};

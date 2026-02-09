@@ -2,10 +2,8 @@ use crate::config::AntigravityResolvedConfig;
 use crate::error::{GeminiCliErrorBody, IsRetryable, PolluxError};
 use crate::providers::antigravity::AntigravityActorHandle;
 use crate::providers::policy::classify_upstream_error;
-use backon::ExponentialBuilder;
-use backon::Retryable;
-use pollux_schema::antigravity::{AntigravityRequestBody, AntigravityRequestMeta};
-use pollux_schema::gemini::GeminiGenerateContentRequest;
+use backon::{ExponentialBuilder, Retryable};
+use pollux_schema::{antigravity::AntigravityRequestMeta, gemini::GeminiGenerateContentRequest};
 use serde_json::Value;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -83,20 +81,20 @@ impl AntigravityClient {
                         model
                     );
 
-                    let mut request = gemini_request.clone();
-                    request
+                    let mut payload = AntigravityRequestMeta {
+                        project: assigned.project_id.clone(),
+                        request_id: AntigravityApi::generate_request_id(),
+                        model: model.clone(),
+                    }
+                    .into_request(gemini_request.clone());
+
+                    payload.prepend_system_instruction(crate::config::CLAUDE_SYSTEM_PREAMBLE);
+
+                    payload
+                        .request
                         .extra
                         .entry("sessionId".to_string())
                         .or_insert_with(|| Value::String(AntigravityApi::generate_session_id()));
-
-                    let payload = AntigravityRequestBody::from((
-                        request,
-                        AntigravityRequestMeta {
-                            project: assigned.project_id.clone(),
-                            request_id: AntigravityApi::generate_request_id(),
-                            model: model.clone(),
-                        },
-                    ));
 
                     let resp = AntigravityApi::try_post(
                         client.clone(),
