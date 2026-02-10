@@ -3,12 +3,14 @@ mod context;
 mod manager;
 mod model_mask;
 mod resource;
+mod thoughtsig;
 mod workers;
 
 pub use context::GeminiContext;
 pub use manager::GeminiCliActorHandle;
 pub(in crate::providers) use manager::spawn;
 pub(crate) use model_mask::{SUPPORTED_MODEL_MASK, SUPPORTED_MODEL_NAMES, model_mask};
+pub use thoughtsig::GeminiThoughtSigService;
 use workers::{GeminiCliRefresherHandle, RefreshOutcome};
 
 use crate::config::CONFIG;

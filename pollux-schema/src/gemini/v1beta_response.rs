@@ -1,3 +1,4 @@
+use super::Content;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -29,7 +30,13 @@ pub struct GeminiResponseBody {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Candidate {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<Value>,
+    pub content: Option<Content>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
+
+    #[serde(rename = "finishReason", skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
 
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,

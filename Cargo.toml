@@ -1,5 +1,5 @@
 [workspace]
-members = ["pollux-schema"]
+members = ["pollux-schema", "pollux-thoughtsig-core"]
 
 [workspace.package]
 version = "0.4.0"
@@ -48,6 +48,7 @@ time = "0.3"
 governor = "0.10"
 async-trait = "0.1"
 pollux-schema = { path = "pollux-schema" }
+pollux-thoughtsig-core = { path = "pollux-thoughtsig-core" }
 
 [dev-dependencies]
 tower = "0.5"

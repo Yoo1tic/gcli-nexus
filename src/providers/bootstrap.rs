@@ -4,7 +4,7 @@ use crate::config::{
 use crate::db::DbActorHandle;
 use crate::providers::antigravity::AntigravityActorHandle;
 use crate::providers::codex::CodexActorHandle;
-use crate::providers::geminicli::GeminiCliActorHandle;
+use crate::providers::geminicli::{GeminiCliActorHandle, GeminiThoughtSigService};
 use std::sync::Arc;
 use tracing::info;
 
@@ -16,6 +16,7 @@ use tracing::info;
 pub struct Providers {
     pub geminicli: GeminiCliActorHandle,
     pub geminicli_cfg: Arc<GeminiCliResolvedConfig>,
+    pub geminicli_thoughtsig: GeminiThoughtSigService,
     pub codex: CodexActorHandle,
     pub codex_cfg: Arc<CodexResolvedConfig>,
     pub antigravity: AntigravityActorHandle,
@@ -66,12 +67,14 @@ impl Providers {
         );
 
         let geminicli = crate::providers::geminicli::spawn(db.clone(), geminicli_cfg.clone()).await;
+        let geminicli_thoughtsig = GeminiThoughtSigService::new();
         let codex = crate::providers::codex::spawn(db.clone(), codex_cfg.clone()).await;
         let antigravity = crate::providers::antigravity::spawn(db, antigravity_cfg.clone()).await;
 
         Self {
             geminicli,
             geminicli_cfg,
+            geminicli_thoughtsig,
             codex,
             codex_cfg,
             antigravity,
