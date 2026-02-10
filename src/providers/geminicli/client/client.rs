@@ -4,11 +4,12 @@ use crate::providers::geminicli::{GeminiCliActorHandle, GeminiContext};
 use crate::providers::policy::classify_upstream_error;
 use crate::providers::provider_endpoints::ProviderEndpoints;
 use crate::providers::upstream_retry::post_json_with_retry;
+use crate::utils::logging::with_pretty_json_debug;
 use backon::{ExponentialBuilder, Retryable};
 use pollux_schema::{gemini::GeminiGenerateContentRequest, geminicli::GeminiCliRequestMeta};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use std::time::{Duration, Instant};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use url::Url;
 
 pub struct GeminiClient {
@@ -104,6 +105,17 @@ impl GeminiClient {
                         project: assigned.project_id.clone(),
                     }
                     .into_request(base_request.clone());
+
+                    with_pretty_json_debug(&payload, |pretty_payload| {
+                        debug!(
+                            channel = "geminicli",
+                            lease.id = assigned.id,
+                            req.model = %model,
+                            req.stream = stream,
+                            body = %pretty_payload,
+                            "[GeminiCLI] Prepared upstream payload"
+                        );
+                    });
 
                     let mut headers = HeaderMap::new();
                     headers.insert(

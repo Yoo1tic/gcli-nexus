@@ -4,6 +4,7 @@ use crate::providers::antigravity::AntigravityActorHandle;
 use crate::providers::policy::classify_upstream_error;
 use crate::providers::provider_endpoints::ProviderEndpoints;
 use crate::providers::upstream_retry::post_json_with_retry;
+use crate::utils::logging::with_pretty_json_debug;
 use backon::{ExponentialBuilder, Retryable};
 use chrono::Utc;
 use pollux_schema::{antigravity::AntigravityRequestMeta, gemini::GeminiGenerateContentRequest};
@@ -11,7 +12,7 @@ use rand::Rng as _;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 use std::time::{Duration, Instant};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use url::Url;
 use uuid::Uuid;
 
@@ -130,6 +131,18 @@ impl AntigravityClient {
                         .extra
                         .entry("sessionId".to_string())
                         .or_insert_with(|| Value::String(Self::generate_session_id()));
+
+                    with_pretty_json_debug(&payload, |pretty_payload| {
+                        debug!(
+                            channel = "antigravity",
+                            lease.id = assigned.id,
+                            req.model = %model,
+                            req.stream = stream,
+                            req.path = %path,
+                            body = %pretty_payload,
+                            "[Antigravity] Prepared upstream payload"
+                        );
+                    });
 
                     let resp = post_json_with_retry(
                         "Antigravity",

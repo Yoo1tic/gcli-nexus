@@ -1,11 +1,13 @@
 use crate::error::CodexError;
 use crate::providers::codex::model_mask;
+use crate::utils::logging::with_pretty_json_debug;
 use axum::{
     Json,
     extract::{FromRequest, Request},
     http::StatusCode,
 };
 use pollux_schema::OpenaiResponsesErrorObject;
+use tracing::debug;
 
 use pollux_schema::OpenaiRequestBody;
 
@@ -65,6 +67,16 @@ where
                 debug_message: None,
             });
         };
+
+        with_pretty_json_debug(&body, |pretty_body| {
+            debug!(
+                channel = "codex",
+                req.model = %model,
+                req.stream = stream,
+                body = %pretty_body,
+                "[Codex] Extracted normalized request body"
+            );
+        });
 
         let ctx = CodexContext {
             model: body.model.clone(),

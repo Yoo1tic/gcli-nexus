@@ -1,8 +1,9 @@
+use crate::utils::logging::with_pretty_json_debug;
 use reqwest::StatusCode;
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
 use std::time::Duration;
 
-pub const UPSTREAM_BODY_PREVIEW_CHARS: usize = 500;
+pub const UPSTREAM_BODY_PREVIEW_CHARS: usize = 300;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ActionForError {
@@ -13,7 +14,7 @@ pub enum ActionForError {
     None,
 }
 
-pub trait MappingAction: std::fmt::Debug + DeserializeOwned {
+pub trait MappingAction: std::fmt::Debug + DeserializeOwned + Serialize {
     fn try_match_rule(&self, status: StatusCode) -> Option<ActionForError>;
 
     fn action_from_status(status: StatusCode) -> ActionForError {
@@ -36,32 +37,35 @@ where
     E: MappingAction,
 {
     let status = resp.status();
-    let bytes = resp.bytes().await.unwrap_or_default().to_vec();
-    let raw_body = String::from_utf8_lossy(&bytes);
-    let raw_body_owned = raw_body.into_owned();
+    let bytes = resp.bytes().await.unwrap_or_default();
+    let raw_body_owned = String::from_utf8_lossy(&bytes).into_owned();
 
     if let Ok(error) = serde_json::from_slice::<E>(&bytes) {
         if let Some(action) = error.try_match_rule(status) {
-            tracing::debug!(
-                %status,
-                ?action,
-                ?error,
-                body = %format!("{:.len$}", raw_body_owned, len = UPSTREAM_BODY_PREVIEW_CHARS),
-                "Upstream structured error matched mapping rule"
-            );
+            with_pretty_json_debug(&error, |pretty_error| {
+                tracing::debug!(
+                    %status,
+                    ?action,
+                    ?error,
+                    body = %pretty_error,
+                    "Upstream structured error matched mapping rule"
+                );
+            });
 
             return (action, map_raw(error));
         }
 
         let action = E::action_from_status(status);
 
-        tracing::debug!(
-            %status,
-            ?action,
-            ?error,
-            body = %format!("{:.len$}", raw_body_owned, len = UPSTREAM_BODY_PREVIEW_CHARS),
-            "Upstream structured error fell back to status mapping"
-        );
+        with_pretty_json_debug(&error, |pretty_error| {
+            tracing::debug!(
+                %status,
+                ?action,
+                ?error,
+                body = %pretty_error,
+                "Upstream structured error fell back to status mapping"
+            );
+        });
 
         return (action, map_status(status, raw_body_owned));
     }

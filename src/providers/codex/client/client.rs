@@ -5,6 +5,7 @@ use crate::providers::manifest::CodexLease;
 use crate::providers::provider_endpoints::ProviderEndpoints;
 use crate::providers::upstream_retry::post_json_with_retry;
 use crate::providers::{ActionForError, policy::classify_upstream_error};
+use crate::utils::logging::with_pretty_json_debug;
 use backon::{ExponentialBuilder, Retryable};
 use pollux_schema::{CodexErrorBody, CodexRequestBody};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
@@ -103,6 +104,18 @@ impl CodexClient {
                     actor_took,
                     model
                 );
+
+                with_pretty_json_debug(&body, |pretty_payload| {
+                    tracing::debug!(
+                        channel = "codex",
+                        lease.id = lease.id,
+                        req.model = %model,
+                        req.client_stream = client_stream,
+                        req.upstream_stream = body.stream,
+                        body = %pretty_payload,
+                        "[Codex] Prepared upstream payload"
+                    );
+                });
 
                 let resp = post_json_with_retry(
                     "Codex",

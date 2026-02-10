@@ -1,6 +1,7 @@
 use crate::error::{GeminiCliError, GeminiErrorObject};
 use crate::providers::antigravity::AntigravityContext;
 use crate::server::router::PolluxState;
+use crate::utils::logging::with_pretty_json_debug;
 use axum::{
     Json, RequestExt,
     extract::{FromRequest, Path, Request},
@@ -8,7 +9,7 @@ use axum::{
 };
 use pollux_schema::gemini::GeminiGenerateContentRequest;
 use std::borrow::Borrow;
-use tracing::warn;
+use tracing::{debug, warn};
 
 pub struct AntigravityPreprocess(pub GeminiGenerateContentRequest, pub AntigravityContext);
 
@@ -96,6 +97,17 @@ where
         let Json(body) = req
             .extract::<Json<GeminiGenerateContentRequest>, _>()
             .await?;
+
+        with_pretty_json_debug(&body, |pretty_body| {
+            debug!(
+                channel = "antigravity",
+                req.model = %model,
+                req.stream = stream,
+                req.path = %path,
+                body = %pretty_body,
+                "[Antigravity] Extracted normalized request body"
+            );
+        });
 
         let ctx = AntigravityContext {
             model,

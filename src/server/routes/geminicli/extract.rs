@@ -1,4 +1,5 @@
 use crate::providers::geminicli::{GeminiContext, model_mask};
+use crate::utils::logging::with_pretty_json_debug;
 use crate::{error::GeminiCliError, error::GeminiErrorObject};
 use axum::{
     Json, RequestExt,
@@ -6,7 +7,7 @@ use axum::{
     http::StatusCode,
 };
 use pollux_schema::gemini::GeminiGenerateContentRequest;
-use tracing::warn;
+use tracing::{debug, warn};
 
 pub struct GeminiPreprocess(pub GeminiGenerateContentRequest, pub GeminiContext);
 
@@ -66,6 +67,17 @@ where
         let stream = path.contains("streamGenerateContent");
 
         let Json(body) = Json::<GeminiGenerateContentRequest>::from_request(req, &()).await?;
+
+        with_pretty_json_debug(&body, |pretty_body| {
+            debug!(
+                channel = "geminicli",
+                req.model = %model,
+                req.stream = stream,
+                req.path = %path,
+                body = %pretty_body,
+                "[GeminiCLI] Extracted normalized request body"
+            );
+        });
 
         let ctx = GeminiContext {
             model,
