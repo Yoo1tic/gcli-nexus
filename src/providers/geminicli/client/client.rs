@@ -2,29 +2,58 @@ use crate::config::GeminiCliResolvedConfig;
 use crate::error::{GeminiCliError, GeminiCliErrorBody, IsRetryable};
 use crate::providers::geminicli::{GeminiCliActorHandle, GeminiContext};
 use crate::providers::policy::classify_upstream_error;
+use crate::providers::provider_endpoints::ProviderEndpoints;
+use crate::providers::upstream_retry::post_json_with_retry;
 use backon::{ExponentialBuilder, Retryable};
 use pollux_schema::{gemini::GeminiGenerateContentRequest, geminicli::GeminiCliRequestMeta};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
-
-use super::api::GeminiApi;
+use url::Url;
 
 pub struct GeminiClient {
     client: reqwest::Client,
     retry_policy: ExponentialBuilder,
+    endpoints: ProviderEndpoints,
 }
 
 impl GeminiClient {
-    pub fn new(cfg: &GeminiCliResolvedConfig, client: reqwest::Client) -> Self {
+    pub fn new(
+        cfg: &GeminiCliResolvedConfig,
+        client: reqwest::Client,
+        base_url: Option<Url>,
+    ) -> Self {
         let retry_policy = ExponentialBuilder::default()
             .with_min_delay(Duration::from_millis(100))
             .with_max_delay(Duration::from_millis(300))
             .with_max_times(cfg.retry_max_times)
             .with_jitter();
+        let endpoints = base_url
+            .map(Self::endpoints_for_base)
+            .unwrap_or_else(Self::default_endpoints);
+
         Self {
             client,
             retry_policy,
+            endpoints,
         }
+    }
+
+    fn default_endpoints() -> ProviderEndpoints {
+        Self::endpoints_for_base(
+            Url::parse("https://cloudcode-pa.googleapis.com")
+                .expect("invalid fixed Gemini base URL"),
+        )
+    }
+
+    fn endpoints_for_base(base: Url) -> ProviderEndpoints {
+        ProviderEndpoints::new(
+            base,
+            "/v1internal:streamGenerateContent",
+            Some("alt=sse"),
+            "/v1internal:generateContent",
+            None,
+        )
     }
 
     pub async fn call_gemini_cli(
@@ -39,14 +68,14 @@ impl GeminiClient {
 
         let handle = handle.clone();
         let client = self.client.clone();
+        let endpoints = self.endpoints.clone();
         let stream = ctx.stream;
-        let retry_policy_inner = self.retry_policy;
 
         let op = {
-            let base_request = base_request.clone();
             move || {
                 let handle = handle.clone();
                 let client = client.clone();
+                let endpoints = endpoints.clone();
                 let base_request = base_request.clone();
                 let model = model.clone();
                 async move {
@@ -76,11 +105,18 @@ impl GeminiClient {
                     }
                     .into_request(base_request.clone());
 
-                    let resp = GeminiApi::try_post_cli(
-                        client.clone(),
-                        assigned.access_token,
-                        stream,
-                        retry_policy_inner,
+                    let mut headers = HeaderMap::new();
+                    headers.insert(
+                        AUTHORIZATION,
+                        HeaderValue::from_str(&format!("Bearer {}", assigned.access_token))
+                            .expect("invalid fixed auth header value"),
+                    );
+
+                    let resp = post_json_with_retry(
+                        "GeminiCLI",
+                        &client,
+                        endpoints.select(stream),
+                        Some(headers),
                         &payload,
                     )
                     .await?;

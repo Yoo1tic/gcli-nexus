@@ -2,13 +2,21 @@ use crate::config::AntigravityResolvedConfig;
 use crate::error::{GeminiCliErrorBody, IsRetryable, PolluxError};
 use crate::providers::antigravity::AntigravityActorHandle;
 use crate::providers::policy::classify_upstream_error;
+use crate::providers::provider_endpoints::ProviderEndpoints;
+use crate::providers::upstream_retry::post_json_with_retry;
 use backon::{ExponentialBuilder, Retryable};
+use chrono::Utc;
 use pollux_schema::{antigravity::AntigravityRequestMeta, gemini::GeminiGenerateContentRequest};
+use rand::Rng as _;
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
+use url::Url;
+use uuid::Uuid;
 
-use super::api::AntigravityApi;
+const REQUEST_ID_PREFIX: &str = "agent";
+const SESSION_ID_MAX_EXCLUSIVE: i64 = 9_000_000_000_000_000_000;
 
 #[derive(Debug, Clone)]
 pub struct AntigravityContext {
@@ -21,20 +29,46 @@ pub struct AntigravityContext {
 pub struct AntigravityClient {
     client: reqwest::Client,
     retry_policy: ExponentialBuilder,
+    endpoints: ProviderEndpoints,
 }
 
 impl AntigravityClient {
-    pub fn new(cfg: &AntigravityResolvedConfig, client: reqwest::Client) -> Self {
+    pub fn new(
+        cfg: &AntigravityResolvedConfig,
+        client: reqwest::Client,
+        base_url: Option<Url>,
+    ) -> Self {
         let retry_policy = ExponentialBuilder::default()
             .with_min_delay(Duration::from_millis(100))
             .with_max_delay(Duration::from_millis(300))
             .with_max_times(cfg.retry_max_times)
             .with_jitter();
+        let endpoints = base_url
+            .map(Self::endpoints_for_base)
+            .unwrap_or_else(Self::default_endpoints);
 
         Self {
             client,
             retry_policy,
+            endpoints,
         }
+    }
+
+    fn default_endpoints() -> ProviderEndpoints {
+        Self::endpoints_for_base(
+            Url::parse("https://daily-cloudcode-pa.googleapis.com")
+                .expect("invalid fixed Antigravity base URL"),
+        )
+    }
+
+    fn endpoints_for_base(base: Url) -> ProviderEndpoints {
+        ProviderEndpoints::new(
+            base,
+            "/v1internal:streamGenerateContent",
+            Some("alt=sse"),
+            "/v1internal:generateContent",
+            None,
+        )
     }
 
     pub async fn call_antigravity(
@@ -45,10 +79,10 @@ impl AntigravityClient {
     ) -> Result<reqwest::Response, PolluxError> {
         let handle = handle.clone();
         let client = self.client.clone();
+        let endpoints = self.endpoints.clone();
         let stream = ctx.stream;
         let model = ctx.model.clone();
         let model_mask = ctx.model_mask;
-        let retry_policy_inner = self.retry_policy;
         let path = ctx.path.clone();
         let gemini_request = body.clone();
 
@@ -57,6 +91,7 @@ impl AntigravityClient {
             move || {
                 let handle = handle.clone();
                 let client = client.clone();
+                let endpoints = endpoints.clone();
                 let gemini_request = gemini_request.clone();
                 let model = model.clone();
                 let path = path.clone();
@@ -83,7 +118,7 @@ impl AntigravityClient {
 
                     let mut payload = AntigravityRequestMeta {
                         project: assigned.project_id.clone(),
-                        request_id: AntigravityApi::generate_request_id(),
+                        request_id: Self::generate_request_id(),
                         model: model.clone(),
                     }
                     .into_request(gemini_request.clone());
@@ -94,13 +129,13 @@ impl AntigravityClient {
                         .request
                         .extra
                         .entry("sessionId".to_string())
-                        .or_insert_with(|| Value::String(AntigravityApi::generate_session_id()));
+                        .or_insert_with(|| Value::String(Self::generate_session_id()));
 
-                    let resp = AntigravityApi::try_post(
-                        client.clone(),
-                        assigned.access_token,
-                        stream,
-                        retry_policy_inner,
+                    let resp = post_json_with_retry(
+                        "Antigravity",
+                        &client,
+                        endpoints.select(stream),
+                        Some(Self::headers(assigned.access_token.as_str())),
                         &payload,
                     )
                     .await?;
@@ -167,5 +202,69 @@ impl AntigravityClient {
                 );
             })
             .await
+    }
+
+    fn headers(access_token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {access_token}"))
+                .expect("invalid fixed auth header value"),
+        );
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static("antigravity/1.16.5 linux/amd64"),
+        );
+        headers
+    }
+
+    fn request_id_from_parts(timestamp_ms: i64, request_uuid: Uuid) -> String {
+        format!("{REQUEST_ID_PREFIX}/{timestamp_ms}/{request_uuid}")
+    }
+
+    fn generate_request_id() -> String {
+        Self::request_id_from_parts(Utc::now().timestamp_millis(), Uuid::new_v4())
+    }
+
+    fn session_id_from_int(value: i64) -> String {
+        format!("-{value}")
+    }
+
+    fn generate_session_id() -> String {
+        let value = rand::rng().random_range(0..SESSION_ID_MAX_EXCLUSIVE);
+        Self::session_id_from_int(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_id_uses_agent_timestamp_uuid_shape() {
+        let id = AntigravityClient::request_id_from_parts(
+            1234,
+            Uuid::parse_str("00000000-0000-4000-8000-000000000000").unwrap(),
+        );
+        assert_eq!(id, "agent/1234/00000000-0000-4000-8000-000000000000");
+    }
+
+    #[test]
+    fn endpoints_use_expected_literals() {
+        let endpoints = AntigravityClient::default_endpoints();
+        assert_eq!(
+            endpoints.select(false).as_str(),
+            "https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent"
+        );
+        assert_eq!(
+            endpoints.select(true).as_str(),
+            "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
+        );
+    }
+
+    #[test]
+    fn session_id_is_negative_decimal_string() {
+        assert_eq!(AntigravityClient::session_id_from_int(42), "-42");
+        assert_eq!(AntigravityClient::session_id_from_int(0), "-0");
     }
 }

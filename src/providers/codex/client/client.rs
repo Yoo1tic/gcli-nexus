@@ -1,14 +1,17 @@
 use crate::config::CodexResolvedConfig;
 use crate::error::{CodexError, IsRetryable};
-use crate::providers::codex::{CODEX_RESPONSES_URL, CodexActorHandle};
+use crate::providers::codex::CodexActorHandle;
+use crate::providers::manifest::CodexLease;
+use crate::providers::provider_endpoints::ProviderEndpoints;
+use crate::providers::upstream_retry::post_json_with_retry;
 use crate::providers::{ActionForError, policy::classify_upstream_error};
 use backon::{ExponentialBuilder, Retryable};
 use pollux_schema::{CodexErrorBody, CodexRequestBody};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 
 use std::time::{Duration, Instant};
 use tracing::info;
-
-use super::api::CodexApi;
+use url::Url;
 
 /// Minimal passthrough client for Codex upstream.
 ///
@@ -18,21 +21,46 @@ use super::api::CodexApi;
 pub(crate) struct CodexClient {
     client: reqwest::Client,
     retry_policy: ExponentialBuilder,
+    endpoints: ProviderEndpoints,
 }
 
 impl CodexClient {
-    pub(crate) fn new(cfg: &CodexResolvedConfig, client: reqwest::Client) -> Self {
+    pub(crate) fn new(
+        cfg: &CodexResolvedConfig,
+        client: reqwest::Client,
+        base_url: Option<Url>,
+    ) -> Self {
         let max_attempts = cfg.retry_max_times.max(1);
         let retry_policy = ExponentialBuilder::default()
             .with_min_delay(Duration::from_millis(100))
             .with_max_delay(Duration::from_millis(300))
             .with_max_times(max_attempts)
             .with_jitter();
+        let endpoints = base_url
+            .map(Self::endpoints_for_base)
+            .unwrap_or_else(Self::default_endpoints);
 
         Self {
             client,
             retry_policy,
+            endpoints,
         }
+    }
+
+    fn default_endpoints() -> ProviderEndpoints {
+        Self::endpoints_for_base(
+            Url::parse("https://chatgpt.com").expect("invalid fixed Codex base URL"),
+        )
+    }
+
+    fn endpoints_for_base(base: Url) -> ProviderEndpoints {
+        ProviderEndpoints::new(
+            base,
+            "/backend-api/codex/responses",
+            None,
+            "/backend-api/codex/responses",
+            None,
+        )
     }
 
     pub(crate) async fn call_codex(
@@ -45,15 +73,14 @@ impl CodexClient {
     ) -> Result<reqwest::Response, CodexError> {
         let handle = handle.clone();
         let client = self.client.clone();
-        let responses_url = CODEX_RESPONSES_URL.clone();
-        let retry_policy_inner = self.retry_policy;
+        let endpoints = self.endpoints.clone();
         let body = body.clone();
         let model = model.to_string();
 
         let op = move || {
             let handle = handle.clone();
             let client = client.clone();
-            let responses_url = responses_url.clone();
+            let endpoints = endpoints.clone();
             let body = body.clone();
             let model = model.clone();
             async move {
@@ -77,12 +104,12 @@ impl CodexClient {
                     model
                 );
 
-                let resp = CodexApi::try_post_codex(
-                    client.clone(),
-                    responses_url.clone(),
-                    &lease,
+                let resp = post_json_with_retry(
+                    "Codex",
+                    &client,
+                    endpoints.select(client_stream),
+                    Some(Self::headers(&lease)),
                     &body,
-                    retry_policy_inner,
                 )
                 .await?;
 
@@ -168,5 +195,20 @@ impl CodexClient {
                 tracing::warn!("Codex retrying after error {} in {:?}", err, dur);
             })
             .await
+    }
+
+    fn headers(lease: &CodexLease) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", lease.access_token))
+                .expect("invalid fixed auth header value"),
+        );
+        headers.insert(
+            "Chatgpt-Account-Id",
+            HeaderValue::from_str(lease.account_id.as_str())
+                .expect("invalid fixed account id header value"),
+        );
+        headers
     }
 }

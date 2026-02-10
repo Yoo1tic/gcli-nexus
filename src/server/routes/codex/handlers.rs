@@ -28,6 +28,7 @@ pub(super) async fn codex_response_handler(
     let caller = CodexClient::new(
         state.providers.codex_cfg.as_ref(),
         state.codex_client.clone(),
+        None,
     );
 
     let upstream_resp = caller

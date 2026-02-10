@@ -2,7 +2,7 @@ use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 
-pub const UPSTREAM_BODY_PREVIEW_CHARS: usize = 200;
+pub const UPSTREAM_BODY_PREVIEW_CHARS: usize = 500;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ActionForError {

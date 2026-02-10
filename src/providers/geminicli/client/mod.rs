@@ -1,4 +1,3 @@
-pub mod api;
 pub mod oauth;
 #[path = "client.rs"]
 pub mod upstream;
