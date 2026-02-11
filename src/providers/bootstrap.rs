@@ -3,6 +3,7 @@ use crate::config::{
 };
 use crate::db::DbActorHandle;
 use crate::providers::antigravity::AntigravityActorHandle;
+use crate::providers::antigravity::AntigravityThoughtSigService;
 use crate::providers::codex::CodexActorHandle;
 use crate::providers::geminicli::{GeminiCliActorHandle, GeminiThoughtSigService};
 use std::sync::Arc;
@@ -21,6 +22,7 @@ pub struct Providers {
     pub codex_cfg: Arc<CodexResolvedConfig>,
     pub antigravity: AntigravityActorHandle,
     pub antigravity_cfg: Arc<AntigravityResolvedConfig>,
+    pub antigravity_thoughtsig: AntigravityThoughtSigService,
 }
 
 impl Providers {
@@ -70,6 +72,7 @@ impl Providers {
         let geminicli_thoughtsig = GeminiThoughtSigService::new();
         let codex = crate::providers::codex::spawn(db.clone(), codex_cfg.clone()).await;
         let antigravity = crate::providers::antigravity::spawn(db, antigravity_cfg.clone()).await;
+        let antigravity_thoughtsig = AntigravityThoughtSigService::new();
 
         Self {
             geminicli,
@@ -79,6 +82,7 @@ impl Providers {
             codex_cfg,
             antigravity,
             antigravity_cfg,
+            antigravity_thoughtsig,
         }
     }
 }

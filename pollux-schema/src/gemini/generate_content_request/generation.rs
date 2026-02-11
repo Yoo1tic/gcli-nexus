@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// `generationConfig` object.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationConfig {
     #[serde(
@@ -32,6 +32,13 @@ pub struct GenerationConfig {
 
     #[serde(default, flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+impl GenerationConfig {
+    /// Mutable access to `generationConfig.thinkingConfig` field.
+    pub fn thinking_config_mut(&mut self) -> &mut Option<Value> {
+        &mut self.thinking_config
+    }
 }
 
 fn deserialize_temperature<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>

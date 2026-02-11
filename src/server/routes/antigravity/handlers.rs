@@ -28,9 +28,11 @@ pub async fn antigravity_proxy_handler(
         .map_err(map_antigravity_error)?;
 
     if ctx.stream {
-        Ok(build_stream_response(upstream_resp).into_response())
+        Ok(build_stream_response(upstream_resp, state.clone()).into_response())
     } else {
-        Ok(build_json_response(upstream_resp).await?.into_response())
+        Ok(build_json_response(upstream_resp, &state)
+            .await?
+            .into_response())
     }
 }
 

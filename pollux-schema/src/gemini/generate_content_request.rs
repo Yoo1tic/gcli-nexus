@@ -18,7 +18,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 pub use content::{Content, Part};
-use generation::GenerationConfig;
+pub use generation::GenerationConfig;
 use system_instruction::deserialize_system_instruction;
 pub use tool::Tool;
 pub use tool_config::ToolConfig;

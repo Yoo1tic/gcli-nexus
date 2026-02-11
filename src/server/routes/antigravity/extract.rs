@@ -94,9 +94,14 @@ where
         };
 
         let stream = path.contains("streamGenerateContent");
-        let Json(body) = req
+        let Json(mut body) = req
             .extract::<Json<GeminiGenerateContentRequest>, _>()
             .await?;
+
+        state
+            .providers
+            .antigravity_thoughtsig
+            .patch_request(&mut body);
 
         with_pretty_json_debug(&body, |pretty_body| {
             debug!(

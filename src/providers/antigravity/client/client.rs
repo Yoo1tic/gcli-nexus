@@ -7,10 +7,13 @@ use crate::providers::upstream_retry::post_json_with_retry;
 use crate::utils::logging::with_pretty_json_debug;
 use backon::{ExponentialBuilder, Retryable};
 use chrono::Utc;
-use pollux_schema::{antigravity::AntigravityRequestMeta, gemini::GeminiGenerateContentRequest};
+use pollux_schema::{
+    antigravity::AntigravityRequestMeta, gemini::GeminiGenerateContentRequest,
+    gemini::GenerationConfig,
+};
 use rand::Rng as _;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 use url::Url;
@@ -18,6 +21,7 @@ use uuid::Uuid;
 
 const REQUEST_ID_PREFIX: &str = "agent";
 const SESSION_ID_MAX_EXCLUSIVE: i64 = 9_000_000_000_000_000_000;
+const CLAUDE_THINKING_BUDGET: u32 = 8096;
 
 #[derive(Debug, Clone)]
 pub struct AntigravityContext {
@@ -123,6 +127,8 @@ impl AntigravityClient {
                         model: model.clone(),
                     }
                     .into_request(gemini_request.clone());
+
+                    Self::apply_claude_thinking_defaults(model.as_str(), &mut payload.request);
 
                     payload.prepend_system_instruction(crate::config::CLAUDE_SYSTEM_PREAMBLE);
 
@@ -247,11 +253,29 @@ impl AntigravityClient {
         let value = rand::rng().random_range(0..SESSION_ID_MAX_EXCLUSIVE);
         Self::session_id_from_int(value)
     }
+
+    fn apply_claude_thinking_defaults(model: &str, request: &mut GeminiGenerateContentRequest) {
+        if !model.starts_with("claude") {
+            return;
+        }
+
+        let gen_config = request
+            .generation_config
+            .get_or_insert_with(GenerationConfig::default);
+
+        if gen_config.thinking_config.is_none() {
+            gen_config.thinking_config = Some(json!({
+                "includeThoughts": true,
+                "thinkingBudget": CLAUDE_THINKING_BUDGET,
+            }));
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn request_id_uses_agent_timestamp_uuid_shape() {
@@ -279,5 +303,73 @@ mod tests {
     fn session_id_is_negative_decimal_string() {
         assert_eq!(AntigravityClient::session_id_from_int(42), "-42");
         assert_eq!(AntigravityClient::session_id_from_int(0), "-0");
+    }
+
+    #[test]
+    fn claude_requests_get_default_thinking_config_when_missing() {
+        let mut request: GeminiGenerateContentRequest = serde_json::from_value(json!({
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}]
+        }))
+        .expect("request must parse");
+
+        AntigravityClient::apply_claude_thinking_defaults(
+            "claude-sonnet-4-5-thinking",
+            &mut request,
+        );
+
+        assert_eq!(
+            request
+                .generation_config
+                .as_ref()
+                .and_then(|cfg| cfg.thinking_config.as_ref()),
+            Some(&json!({
+                "includeThoughts": true,
+                "thinkingBudget": CLAUDE_THINKING_BUDGET,
+            }))
+        );
+    }
+
+    #[test]
+    fn claude_requests_keep_existing_thinking_config() {
+        let mut request: GeminiGenerateContentRequest = serde_json::from_value(json!({
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+            "generationConfig": {
+                "thinkingConfig": {
+                    "includeThoughts": false,
+                    "thinkingBudget": 2048
+                }
+            }
+        }))
+        .expect("request must parse");
+
+        AntigravityClient::apply_claude_thinking_defaults(
+            "claude-sonnet-4-5-thinking",
+            &mut request,
+        );
+
+        assert_eq!(
+            request
+                .generation_config
+                .as_ref()
+                .and_then(|cfg| cfg.thinking_config.as_ref()),
+            Some(&json!({
+                "includeThoughts": false,
+                "thinkingBudget": 2048
+            }))
+        );
+    }
+
+    #[test]
+    fn non_claude_requests_do_not_get_thinking_config_default() {
+        let request: GeminiGenerateContentRequest = serde_json::from_value(json!({
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}]
+        }))
+        .expect("request must parse");
+
+        let model = "gemini-2.5-pro";
+        let mut request = request;
+        AntigravityClient::apply_claude_thinking_defaults(model, &mut request);
+
+        assert!(request.generation_config.is_none());
     }
 }
