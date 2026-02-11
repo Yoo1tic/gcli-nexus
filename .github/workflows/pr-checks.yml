@@ -21,6 +21,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: true
+  CLAUDE_SYSTEM_PREAMBLE: ${{ vars.CLAUDE_SYSTEM_PREAMBLE }}
 
 permissions:
   contents: read

@@ -17,6 +17,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: true
+  CLAUDE_SYSTEM_PREAMBLE: ${{ vars.CLAUDE_SYSTEM_PREAMBLE }}
 
 jobs:
   build-linux-musl:

@@ -71,6 +71,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
           build-args: |
             SQLX_OFFLINE=true
+            CLAUDE_SYSTEM_PREAMBLE=${{ vars.CLAUDE_SYSTEM_PREAMBLE }}
 
       - name: Export digest
         run: |

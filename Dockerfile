@@ -13,8 +13,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
 
-ARG GCLI_CLIENT_ID
-ARG GCLI_CLIENT_SECRET
+ARG CLAUDE_SYSTEM_PREAMBLE
 ARG SQLX_OFFLINE
 
 RUN cargo build --release && \
