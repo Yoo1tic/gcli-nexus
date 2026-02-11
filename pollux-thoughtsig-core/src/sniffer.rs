@@ -1,5 +1,5 @@
-use crate::fingerprint::CacheKeyGenerator;
 use crate::SignatureCacheStore;
+use crate::fingerprint::CacheKeyGenerator;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -18,16 +18,16 @@ pub trait Sniffable {
 
 #[derive(Debug, Default, Clone)]
 pub struct SessionState {
-    text_buffer: String,
-    function_call_json: Option<Value>,
+    thought_buffer: String,
+    function_buffer: Option<Value>,
     pending_signature: Option<String>,
     current_index: Option<u32>,
 }
 
 impl SessionState {
     fn reset(&mut self, new_index: u32) {
-        self.text_buffer.clear();
-        self.function_call_json = None;
+        self.thought_buffer.clear();
+        self.function_buffer = None;
         self.pending_signature = None;
         self.current_index = Some(new_index);
     }
@@ -56,9 +56,9 @@ impl SignatureSniffer {
         }
 
         match item.data() {
-            SniffEvent::ThoughtText(text) => self.state.text_buffer.push_str(text),
-            SniffEvent::FunctionCall(function_call) => {
-                self.state.function_call_json = Some(function_call.clone())
+            SniffEvent::ThoughtText(thought) => self.state.thought_buffer.push_str(thought),
+            SniffEvent::FunctionCall(function) => {
+                self.state.function_buffer = Some(function.clone())
             }
             SniffEvent::None => {}
         }
@@ -73,23 +73,34 @@ impl SignatureSniffer {
     }
 
     fn flush(&mut self) {
-        let signature = self
+        if self.state.thought_buffer.is_empty() && self.state.function_buffer.is_none() {
+            // No data, so we skip flushing to avoid storing empty keys
+            return;
+        }
+
+        let Some(signature) = self
             .state
             .pending_signature
             .as_deref()
-            .filter(|signature| !signature.is_empty())
-            .map(ToOwned::to_owned);
+            .filter(|&s| !s.is_empty())
+        else {
+            // No signature to store, so we skip flushing
+            return;
+        };
 
-        if let Some(signature) = signature {
-            if let Some(text_key) = CacheKeyGenerator::generate_text(&self.state.text_buffer) {
-                self.moka_cache.insert(text_key, Arc::from(signature.clone()));
-            }
+        let sig_arc: Arc<str> = Arc::from(signature);
 
-            if let Some(function_call) = self.state.function_call_json.as_ref() {
-                if let Some(function_key) = CacheKeyGenerator::generate_json(function_call) {
-                    self.moka_cache.insert(function_key, Arc::from(signature));
-                }
-            }
+        if let Some(text_key) = CacheKeyGenerator::generate_text(&self.state.thought_buffer) {
+            self.moka_cache.insert(text_key, sig_arc.clone());
+        }
+
+        if let Some(function_key) = self
+            .state
+            .function_buffer
+            .as_ref()
+            .and_then(|fc| CacheKeyGenerator::generate_json(fc))
+        {
+            self.moka_cache.insert(function_key, sig_arc);
         }
     }
 }
@@ -162,8 +173,8 @@ mod tests {
         };
         sniffer.inspect(&third);
 
-        let key = CacheKeyGenerator::generate_text("alpha beta")
-            .expect("text key must be generated");
+        let key =
+            CacheKeyGenerator::generate_text("alpha beta").expect("text key must be generated");
         let cached = cache.get(&key).expect("text key must be stored");
         assert_eq!(cached, Arc::from("sig_001"));
     }
@@ -206,8 +217,7 @@ mod tests {
         };
 
         sniffer.inspect(&item);
-        let key = CacheKeyGenerator::generate_text("alpha")
-            .expect("text key must be generated");
+        let key = CacheKeyGenerator::generate_text("alpha").expect("text key must be generated");
         assert!(cache.get(&key).is_none());
     }
 }

@@ -1,29 +1,38 @@
 use crate::store::SignatureCacheKey;
+
 use ahash::AHasher;
 use serde::Serialize;
 use std::hash::Hasher;
+
+const DOMAIN_TEXT: u8 = 1;
+const DOMAIN_JSON: u8 = 2;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CacheKeyGenerator;
 
 impl CacheKeyGenerator {
     pub fn generate_text(text: impl AsRef<str>) -> Option<SignatureCacheKey> {
-        let trimmed = text.as_ref().trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-
-        let mut hasher = AHasher::default();
-        hasher.write(trimmed.as_bytes());
-        Some(hasher.finish())
+        Some(text.as_ref())
+            .filter(|&t| !t.trim().is_empty())
+            .map(|t| {
+                let mut hasher = AHasher::default();
+                hasher.write_u8(DOMAIN_TEXT);
+                hasher.write(t.as_bytes());
+                hasher.finish()
+            })
     }
 
     pub fn generate_json(value: &impl Serialize) -> Option<SignatureCacheKey> {
         let mut normalized = serde_json::to_value(value).ok()?;
+        if normalized.is_null() {
+            return None;
+        }
         normalized.sort_all_objects();
+        let bytes = serde_json::to_vec(&normalized).ok()?;
 
         let mut hasher = AHasher::default();
-        hasher.write(normalized.to_string().as_bytes());
+        hasher.write_u8(DOMAIN_JSON);
+        hasher.write(&bytes);
         Some(hasher.finish())
     }
 }
