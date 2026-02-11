@@ -1,4 +1,4 @@
-use crate::store::SignatureCacheKey;
+use crate::CacheKey;
 
 use ahash::AHasher;
 use serde::Serialize;
@@ -11,7 +11,7 @@ const DOMAIN_JSON: u8 = 2;
 pub struct CacheKeyGenerator;
 
 impl CacheKeyGenerator {
-    pub fn generate_text(text: impl AsRef<str>) -> Option<SignatureCacheKey> {
+    pub fn generate_text(text: impl AsRef<str>) -> Option<CacheKey> {
         Some(text.as_ref())
             .filter(|&t| !t.trim().is_empty())
             .map(|t| {
@@ -22,7 +22,7 @@ impl CacheKeyGenerator {
             })
     }
 
-    pub fn generate_json(value: &impl Serialize) -> Option<SignatureCacheKey> {
+    pub fn generate_json(value: &impl Serialize) -> Option<CacheKey> {
         let mut normalized = serde_json::to_value(value).ok()?;
         if normalized.is_null() {
             return None;

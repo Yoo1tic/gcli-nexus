@@ -1,4 +1,4 @@
-use crate::SignatureCacheStore;
+use crate::ThoughtSignatureEngine;
 use crate::fingerprint::CacheKeyGenerator;
 use serde_json::Value;
 use std::sync::Arc;
@@ -35,14 +35,14 @@ impl SessionState {
 
 #[derive(Clone)]
 pub struct SignatureSniffer {
-    pub(crate) moka_cache: SignatureCacheStore,
-    pub(crate) state: SessionState,
+    engine: Arc<ThoughtSignatureEngine>,
+    state: SessionState,
 }
 
 impl SignatureSniffer {
-    pub fn new(moka_cache: SignatureCacheStore) -> Self {
+    pub fn new(engine: Arc<ThoughtSignatureEngine>) -> Self {
         Self {
-            moka_cache,
+            engine,
             state: SessionState::default(),
         }
     }
@@ -88,10 +88,10 @@ impl SignatureSniffer {
             return;
         };
 
-        let sig_arc: Arc<str> = Arc::from(signature);
+        let signature: crate::ThoughtSignature = Arc::from(signature);
 
         if let Some(text_key) = CacheKeyGenerator::generate_text(&self.state.thought_buffer) {
-            self.moka_cache.insert(text_key, sig_arc.clone());
+            self.engine.put(text_key, signature.clone());
         }
 
         if let Some(function_key) = self
@@ -100,7 +100,7 @@ impl SignatureSniffer {
             .as_ref()
             .and_then(|fc| CacheKeyGenerator::generate_json(fc))
         {
-            self.moka_cache.insert(function_key, sig_arc);
+            self.engine.put(function_key, signature);
         }
     }
 }
@@ -146,8 +146,8 @@ mod tests {
 
     #[test]
     fn text_signature_is_flushed_into_store() {
-        let cache = SignatureCacheStore::builder().max_capacity(128).build();
-        let mut sniffer = SignatureSniffer::new(cache.clone());
+        let engine = Arc::new(ThoughtSignatureEngine::new(3600, 128));
+        let mut sniffer = SignatureSniffer::new(engine.clone());
 
         let first = FakeSniffable {
             data_kind: DataKind::Text("alpha "),
@@ -175,14 +175,14 @@ mod tests {
 
         let key =
             CacheKeyGenerator::generate_text("alpha beta").expect("text key must be generated");
-        let cached = cache.get(&key).expect("text key must be stored");
+        let cached = engine.get(&key).expect("text key must be stored");
         assert_eq!(cached, Arc::from("sig_001"));
     }
 
     #[test]
     fn function_json_hash_is_used_as_key() {
-        let cache = SignatureCacheStore::builder().max_capacity(128).build();
-        let mut sniffer = SignatureSniffer::new(cache.clone());
+        let engine = Arc::new(ThoughtSignatureEngine::new(3600, 128));
+        let mut sniffer = SignatureSniffer::new(engine.clone());
 
         let function_call = serde_json::json!({
             "name": "get_weather",
@@ -200,14 +200,14 @@ mod tests {
 
         let key = CacheKeyGenerator::generate_json(&function_call)
             .expect("function hash key must be generated");
-        let cached = cache.get(&key).expect("function hash key must be stored");
+        let cached = engine.get(&key).expect("function hash key must be stored");
         assert_eq!(cached, Arc::from("sig_fn_001"));
     }
 
     #[test]
     fn finished_event_without_signature_does_not_store() {
-        let cache = SignatureCacheStore::builder().max_capacity(128).build();
-        let mut sniffer = SignatureSniffer::new(cache.clone());
+        let engine = Arc::new(ThoughtSignatureEngine::new(3600, 128));
+        let mut sniffer = SignatureSniffer::new(engine.clone());
 
         let item = FakeSniffable {
             data_kind: DataKind::Text("alpha"),
@@ -218,6 +218,6 @@ mod tests {
 
         sniffer.inspect(&item);
         let key = CacheKeyGenerator::generate_text("alpha").expect("text key must be generated");
-        assert!(cache.get(&key).is_none());
+        assert!(engine.get(&key).is_none());
     }
 }

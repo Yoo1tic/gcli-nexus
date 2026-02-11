@@ -1,93 +1,32 @@
-use super::adapter_request::{apply_request_fill_decisions, collect_request_patch_targets};
+use super::adapter_request::patch_request;
 use super::adapter_response::GeminiResponseAdapter;
 use pollux_schema::gemini::{GeminiGenerateContentRequest, GeminiResponseBody};
-use pollux_thoughtsig_core::{
-    EnginePolicy, FillAction, FillStats, MokaSignatureStore, SignatureSniffer,
-    ThoughtSignatureEngine,
-};
+use pollux_thoughtsig_core::{SignatureSniffer, ThoughtSignatureEngine};
 use std::sync::Arc;
-use tracing::debug;
 
 const DEFAULT_TTL_SECS: u64 = 60 * 60;
 const DEFAULT_MAX_CAPACITY: u64 = 200_000;
 
 #[derive(Clone)]
 pub struct GeminiThoughtSigService {
-    store: MokaSignatureStore,
     engine: Arc<ThoughtSignatureEngine>,
 }
 
 impl GeminiThoughtSigService {
     pub fn new() -> Self {
-        let store = MokaSignatureStore::new(DEFAULT_TTL_SECS, DEFAULT_MAX_CAPACITY);
-        let policy = EnginePolicy::default();
-        let engine = ThoughtSignatureEngine::new(store.clone(), policy);
+        let engine = ThoughtSignatureEngine::new(DEFAULT_TTL_SECS, DEFAULT_MAX_CAPACITY);
 
         Self {
-            store,
             engine: Arc::new(engine),
         }
     }
 
     pub fn new_stream_sniffer(&self) -> SignatureSniffer {
-        SignatureSniffer::new(self.store.cache())
+        SignatureSniffer::new(self.engine.clone())
     }
 
-    pub fn patch_request(
-        &self,
-        model: &str,
-        request: &mut GeminiGenerateContentRequest,
-    ) -> FillStats {
-        let targets = collect_request_patch_targets(request);
-        let mut decisions = Vec::with_capacity(targets.len());
-
-        for target in &targets {
-            let decision = self.engine.fill_one(
-                target.key_input.as_ref(),
-                target.existing_signature.as_deref(),
-                true,
-            );
-
-            let action = match &decision.action {
-                FillAction::Keep => {
-                    if target.existing_signature.is_some() {
-                        "keep_existing"
-                    } else {
-                        "keep_noop"
-                    }
-                }
-                FillAction::UseCached(_) => "cache_hit",
-                FillAction::UseDummy => "dummy_fill",
-            };
-
-            let signature_preview = match &decision.action {
-                FillAction::UseCached(signature) => preview_signature(signature),
-                FillAction::Keep => target
-                    .existing_signature
-                    .as_deref()
-                    .map(preview_signature)
-                    .unwrap_or_else(|| "<none>".to_string()),
-                FillAction::UseDummy => self.engine.dummy_signature().to_string(),
-            };
-
-            debug!(
-                channel = "geminicli",
-                thoughtsig.phase = "fill",
-                req.model = %model,
-                content_idx = target.content_idx,
-                part_idx = target.part_idx,
-                key = ?decision.key,
-                action = action,
-                signature = %signature_preview,
-                "Thought signature decision"
-            );
-
-            decisions.push(decision);
-        }
-
-        let stats = ThoughtSignatureEngine::classify_fill(&decisions);
-        apply_request_fill_decisions(request, &targets, &decisions, self.engine.dummy_signature());
-        stats
+    pub fn patch_request(&self, request: &mut GeminiGenerateContentRequest) {
+        patch_request(request, self.engine.as_ref())
     }
 
     pub fn record_response(&self, response: &GeminiResponseBody) {
@@ -113,14 +52,6 @@ impl GeminiThoughtSigService {
     }
 }
 
-fn preview_signature(signature: &str) -> String {
-    const MAX: usize = 48;
-    if signature.len() <= MAX {
-        return signature.to_string();
-    }
-    format!("{}...", &signature[..MAX])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,9 +75,7 @@ mod tests {
         }))
         .expect("request json must parse");
 
-        let stats = service.patch_request("gemini-3-pro-preview", &mut req);
-        assert_eq!(stats.total_considered, 1);
-        assert_eq!(stats.dummy_filled, 1);
+        service.patch_request(&mut req);
         assert_eq!(
             req.contents[0].parts[0].thought_signature.as_deref(),
             Some("skip_thought_signature_validator")
@@ -193,9 +122,7 @@ mod tests {
         }))
         .expect("request json must parse");
 
-        let fill_stats = service.patch_request("gemini-3-pro-preview", &mut req);
-        assert_eq!(fill_stats.cache_hits, 1);
-        assert_eq!(fill_stats.dummy_filled, 0);
+        service.patch_request(&mut req);
         assert_eq!(
             req.contents[0].parts[0].thought_signature.as_deref(),
             Some("real_signature_123")
@@ -252,9 +179,7 @@ mod tests {
         }))
         .expect("request json must parse");
 
-        let fill_stats = service.patch_request("gemini-3-pro-preview", &mut req);
-        assert_eq!(fill_stats.cache_hits, 1);
-        assert_eq!(fill_stats.dummy_filled, 0);
+        service.patch_request(&mut req);
         assert_eq!(
             req.contents[0].parts[0].thought_signature.as_deref(),
             Some("fn_signature_123")
@@ -319,9 +244,7 @@ mod tests {
         }))
         .expect("request json must parse");
 
-        let fill_stats = service.patch_request("gemini-3-pro-preview", &mut req);
-        assert_eq!(fill_stats.cache_hits, 1);
-        assert_eq!(fill_stats.dummy_filled, 0);
+        service.patch_request(&mut req);
         assert_eq!(
             req.contents[0].parts[0].thought_signature.as_deref(),
             Some("stream_sig_001")

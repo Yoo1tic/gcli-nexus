@@ -70,10 +70,10 @@ where
         let Json(mut body) = Json::<GeminiGenerateContentRequest>::from_request(req, &()).await?;
 
         let state = state.borrow();
-        let fill_stats = state
+        state
             .providers
             .geminicli_thoughtsig
-            .patch_request(model.as_str(), &mut body);
+            .patch_request(&mut body);
 
         with_pretty_json_debug(&body, |pretty_body| {
             debug!(
@@ -81,9 +81,6 @@ where
                 req.model = %model,
                 req.stream = stream,
                 req.path = %path,
-                thoughtsig.total = fill_stats.total_considered,
-                thoughtsig.cache_hits = fill_stats.cache_hits,
-                thoughtsig.dummy_filled = fill_stats.dummy_filled,
                 body = %pretty_body,
                 "[GeminiCLI] Extracted normalized request body"
             );

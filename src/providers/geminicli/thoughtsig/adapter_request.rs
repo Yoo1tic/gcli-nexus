@@ -1,71 +1,88 @@
 use pollux_schema::gemini::GeminiGenerateContentRequest;
-use pollux_thoughtsig_core::{FillAction, FillDecision};
+use pollux_thoughtsig_core::{CacheKeyGenerator, ThoughtSigPatchable, ThoughtSignatureEngine};
 use serde_json::Value;
+use tracing::debug;
 
-pub(super) struct RequestPatchTarget {
-    pub content_idx: usize,
-    pub part_idx: usize,
-    pub key_input: Option<Value>,
-    pub existing_signature: Option<String>,
+pub(super) struct GeminiRequestAdapter<'a> {
+    request: &'a mut GeminiGenerateContentRequest,
 }
 
-pub(super) fn collect_request_patch_targets(
-    req: &GeminiGenerateContentRequest,
-) -> Vec<RequestPatchTarget> {
-    let mut targets = Vec::new();
+impl<'a> GeminiRequestAdapter<'a> {
+    fn new(request: &'a mut GeminiGenerateContentRequest) -> Self {
+        Self { request }
+    }
+}
 
-    for (content_idx, content) in req.contents.iter().enumerate() {
-        if content.role.as_deref() != Some("model") {
-            continue;
+impl ThoughtSigPatchable for GeminiRequestAdapter<'_> {
+    fn should_patch(&self) -> bool {
+        self.request.contents.iter().any(|content| {
+            content.role.as_deref() == Some("model")
+                && content
+                    .parts
+                    .iter()
+                    .any(|part| part.function_call.is_some() || part.thought == Some(true))
+        })
+    }
+
+    fn patch_thought_signatures(&mut self, engine: &ThoughtSignatureEngine) {
+        if !self.should_patch() {
+            return;
         }
 
-        for (part_idx, part) in content.parts.iter().enumerate() {
-            if let Some(function_call) = part.function_call.as_ref() {
-                targets.push(RequestPatchTarget {
-                    content_idx,
-                    part_idx,
-                    key_input: Some(function_call.clone()),
-                    existing_signature: part.thought_signature.clone(),
-                });
+        for (content_idx, content) in self.request.contents.iter_mut().enumerate() {
+            if content.role.as_deref() != Some("model") {
                 continue;
             }
 
-            if part.thought == Some(true) {
-                targets.push(RequestPatchTarget {
-                    content_idx,
-                    part_idx,
-                    key_input: part.text.clone().map(Value::String),
-                    existing_signature: part.thought_signature.clone(),
-                });
+            for (part_idx, part) in content.parts.iter_mut().enumerate() {
+                let text_key_input = if part.function_call.is_some() {
+                    None
+                } else if part.thought == Some(true) {
+                    part.text.clone().map(Value::String)
+                } else {
+                    continue;
+                };
+
+                let key_input = part.function_call.as_ref().or(text_key_input.as_ref());
+                let key = match key_input {
+                    Some(Value::String(text)) => CacheKeyGenerator::generate_text(text),
+                    Some(value) => CacheKeyGenerator::generate_json(value),
+                    None => None,
+                };
+
+                let signature = match key {
+                    Some(cache_key) => engine.get_signature(&cache_key),
+                    None => engine.default_signature(),
+                };
+                part.thought_signature = Some(signature.to_string());
+                let signature_preview = preview_signature(signature.as_ref());
+
+                debug!(
+                    channel = "geminicli",
+                    thoughtsig.phase = "fill",
+                    content_idx = content_idx,
+                    part_idx = part_idx,
+                    key = ?key,
+                    signature = %signature_preview,
+                    "Thought signature decision"
+                );
             }
         }
     }
-
-    targets
 }
 
-pub(super) fn apply_request_fill_decisions(
-    req: &mut GeminiGenerateContentRequest,
-    targets: &[RequestPatchTarget],
-    decisions: &[FillDecision],
-    dummy_signature: &str,
+pub(super) fn patch_request(
+    request: &mut GeminiGenerateContentRequest,
+    engine: &ThoughtSignatureEngine,
 ) {
-    for (target, decision) in targets.iter().zip(decisions.iter()) {
-        let Some(content) = req.contents.get_mut(target.content_idx) else {
-            continue;
-        };
-        let Some(part) = content.parts.get_mut(target.part_idx) else {
-            continue;
-        };
+    let mut adapter = GeminiRequestAdapter::new(request);
+    adapter.patch_thought_signatures(engine)
+}
 
-        match &decision.action {
-            FillAction::Keep => {}
-            FillAction::UseCached(signature) => {
-                part.thought_signature = Some(signature.to_string());
-            }
-            FillAction::UseDummy => {
-                part.thought_signature = Some(dummy_signature.to_string());
-            }
-        }
+fn preview_signature(signature: &str) -> String {
+    const MAX: usize = 48;
+    if signature.len() <= MAX {
+        return signature.to_string();
     }
+    format!("{}...", &signature[..MAX])
 }

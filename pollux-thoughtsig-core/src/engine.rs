@@ -1,81 +1,44 @@
-use crate::{
-    fingerprint::CacheKeyGenerator,
-    policy::EnginePolicy,
-    store::{MokaSignatureStore, SignatureCacheKey},
-    types::{FillAction, FillDecision, FillStats},
-};
-use serde_json::Value;
+use moka::sync::Cache;
+use std::{sync::Arc, time::Duration};
+
+pub type CacheKey = u64;
+pub type ThoughtSignature = Arc<str>;
+pub type SignatureCacheStore = Cache<CacheKey, ThoughtSignature>;
 
 pub struct ThoughtSignatureEngine {
-    store: MokaSignatureStore,
-    policy: EnginePolicy,
+    cache: SignatureCacheStore,
+    dummy_signature: ThoughtSignature,
 }
 
 impl ThoughtSignatureEngine {
-    pub fn new(store: MokaSignatureStore, policy: EnginePolicy) -> Self {
-        Self { store, policy }
-    }
+    pub fn new(ttl_secs: u64, max_capacity: u64) -> Self {
+        let cache = SignatureCacheStore::builder()
+            .time_to_live(Duration::from_secs(ttl_secs.max(1)))
+            .max_capacity(max_capacity.max(1))
+            .build();
+        let dummy_signature: ThoughtSignature = Arc::from("skip_thought_signature_validator");
 
-    pub fn dummy_signature(&self) -> &str {
-        self.policy.dummy_signature.as_str()
-    }
-
-    pub fn fill_one(
-        &self,
-        key_input: Option<&Value>,
-        existing_signature: Option<&str>,
-        required: bool,
-    ) -> FillDecision {
-        let key = self.make_key(key_input);
-
-        if existing_signature.is_some() && self.policy.trust_existing {
-            return FillDecision {
-                action: FillAction::Keep,
-                key,
-            };
-        }
-
-        if !required || !self.policy.fill_missing {
-            return FillDecision {
-                action: FillAction::Keep,
-                key,
-            };
-        }
-
-        if let Some(cache_key) = key.as_ref() {
-            if let Some(sig) = self.store.get(cache_key) {
-                return FillDecision {
-                    action: FillAction::UseCached(sig),
-                    key,
-                };
-            }
-        }
-
-        FillDecision {
-            action: FillAction::UseDummy,
-            key,
+        Self {
+            cache,
+            dummy_signature,
         }
     }
 
-    pub fn classify_fill(decisions: &[FillDecision]) -> FillStats {
-        let mut stats = FillStats::default();
-        for decision in decisions {
-            stats.total_considered += 1;
-            match decision.action {
-                FillAction::Keep => stats.kept_existing += 1,
-                FillAction::UseCached(_) => stats.cache_hits += 1,
-                FillAction::UseDummy => stats.dummy_filled += 1,
-            }
-        }
-        stats
+    pub fn get(&self, key: &CacheKey) -> Option<ThoughtSignature> {
+        self.cache.get(key)
     }
 
-    pub fn make_key(&self, key_input: Option<&Value>) -> Option<SignatureCacheKey> {
-        match key_input {
-            Some(Value::String(text)) => CacheKeyGenerator::generate_text(text),
-            Some(value) => CacheKeyGenerator::generate_json(value),
-            None => None,
-        }
+    pub fn put(&self, key: CacheKey, signature: ThoughtSignature) {
+        self.cache.insert(key, signature);
+    }
+
+    pub fn default_signature(&self) -> ThoughtSignature {
+        self.dummy_signature.clone()
+    }
+
+    pub fn get_signature(&self, key_input: &CacheKey) -> ThoughtSignature {
+        self.get(key_input)
+            .unwrap_or_else(|| self.default_signature())
     }
 }
 
@@ -84,11 +47,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fill_one_uses_dummy_when_no_cache() {
-        let store = MokaSignatureStore::new(3600, 1024);
-        let engine = ThoughtSignatureEngine::new(store, EnginePolicy::default());
+    fn get_signature_uses_dummy_when_no_cache() {
+        let engine = ThoughtSignatureEngine::new(3600, 1024);
+        let key = 42_u64;
 
-        let decision = engine.fill_one(Some(&Value::String("abc".to_string())), None, true);
-        assert!(matches!(decision.action, FillAction::UseDummy));
+        let signature = engine.get_signature(&key);
+        assert_eq!(signature, engine.dummy_signature);
+    }
+
+    #[test]
+    fn get_signature_hits_cache_when_present() {
+        let engine = ThoughtSignatureEngine::new(3600, 1024);
+        let key = 7_u64;
+        engine.put(key, Arc::from("sig_007"));
+
+        let signature = engine.get_signature(&key);
+        assert_eq!(signature.as_ref(), "sig_007");
     }
 }
