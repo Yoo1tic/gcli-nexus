@@ -12,6 +12,12 @@ pub struct AntigravityThoughtSigService {
     engine: Arc<ThoughtSignatureEngine>,
 }
 
+impl Default for AntigravityThoughtSigService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AntigravityThoughtSigService {
     pub fn new() -> Self {
         let engine = ThoughtSignatureEngine::new(DEFAULT_TTL_SECS, DEFAULT_MAX_CAPACITY);

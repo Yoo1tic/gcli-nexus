@@ -12,6 +12,12 @@ pub struct GeminiThoughtSigService {
     engine: Arc<ThoughtSignatureEngine>,
 }
 
+impl Default for GeminiThoughtSigService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GeminiThoughtSigService {
     pub fn new() -> Self {
         let engine = ThoughtSignatureEngine::new(DEFAULT_TTL_SECS, DEFAULT_MAX_CAPACITY);

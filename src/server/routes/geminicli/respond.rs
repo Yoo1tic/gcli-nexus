@@ -67,9 +67,10 @@ where
         let state = state.clone();
 
         let out = {
-            if upstream_event.data.is_empty() {
-                Ok(None)
-            } else if upstream_event.data == "[DONE]" || upstream_event.event == "done" {
+            if upstream_event.data.is_empty()
+                || upstream_event.data == "[DONE]"
+                || upstream_event.event == "done"
+            {
                 Ok(None)
             } else {
                 let Some(gemini_resp) = parse_sse_payload(&upstream_event.data) else {

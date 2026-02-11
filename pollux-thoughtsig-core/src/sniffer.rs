@@ -48,11 +48,11 @@ impl SignatureSniffer {
     }
 
     pub fn inspect<T: Sniffable>(&mut self, item: &T) {
-        if let Some(next_index) = item.index() {
-            if self.state.current_index != Some(next_index) {
-                self.flush();
-                self.state.reset(next_index);
-            }
+        if let Some(next_index) = item.index()
+            && self.state.current_index != Some(next_index)
+        {
+            self.flush();
+            self.state.reset(next_index);
         }
 
         match item.data() {
@@ -98,7 +98,7 @@ impl SignatureSniffer {
             .state
             .function_buffer
             .as_ref()
-            .and_then(|fc| CacheKeyGenerator::generate_json(fc))
+            .and_then(CacheKeyGenerator::generate_json)
         {
             self.engine.put_signature(function_key, signature);
         }
