@@ -91,7 +91,7 @@ impl SignatureSniffer {
         let signature: crate::ThoughtSignature = Arc::from(signature);
 
         if let Some(text_key) = CacheKeyGenerator::generate_text(&self.state.thought_buffer) {
-            self.engine.put(text_key, signature.clone());
+            self.engine.put_signature(text_key, signature.clone());
         }
 
         if let Some(function_key) = self
@@ -100,7 +100,7 @@ impl SignatureSniffer {
             .as_ref()
             .and_then(|fc| CacheKeyGenerator::generate_json(fc))
         {
-            self.engine.put(function_key, signature);
+            self.engine.put_signature(function_key, signature);
         }
     }
 }
@@ -175,7 +175,7 @@ mod tests {
 
         let key =
             CacheKeyGenerator::generate_text("alpha beta").expect("text key must be generated");
-        let cached = engine.get(&key).expect("text key must be stored");
+        let cached = engine.get_signature(&key).expect("text key must be stored");
         assert_eq!(cached, Arc::from("sig_001"));
     }
 
@@ -200,7 +200,9 @@ mod tests {
 
         let key = CacheKeyGenerator::generate_json(&function_call)
             .expect("function hash key must be generated");
-        let cached = engine.get(&key).expect("function hash key must be stored");
+        let cached = engine
+            .get_signature(&key)
+            .expect("function hash key must be stored");
         assert_eq!(cached, Arc::from("sig_fn_001"));
     }
 
@@ -218,6 +220,6 @@ mod tests {
 
         sniffer.inspect(&item);
         let key = CacheKeyGenerator::generate_text("alpha").expect("text key must be generated");
-        assert!(engine.get(&key).is_none());
+        assert!(engine.get_signature(&key).is_none());
     }
 }

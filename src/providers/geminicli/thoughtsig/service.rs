@@ -21,32 +21,15 @@ impl GeminiThoughtSigService {
         }
     }
 
-    pub fn new_stream_sniffer(&self) -> SignatureSniffer {
-        SignatureSniffer::new(self.engine.clone())
-    }
-
     pub fn patch_request(&self, request: &mut GeminiGenerateContentRequest) {
         patch_request(request, self.engine.as_ref())
     }
 
-    pub fn record_response(&self, response: &GeminiResponseBody) {
-        let mut sniffer = self.new_stream_sniffer();
-        self.inspect_response_into_sniffer(response, &mut sniffer);
+    pub fn build_sniffer(&self) -> SignatureSniffer {
+        SignatureSniffer::new(self.engine.clone())
     }
 
-    pub fn record_stream_chunk(
-        &self,
-        stream_sniffer: &mut SignatureSniffer,
-        response: &GeminiResponseBody,
-    ) {
-        self.inspect_response_into_sniffer(response, stream_sniffer);
-    }
-
-    fn inspect_response_into_sniffer(
-        &self,
-        response: &GeminiResponseBody,
-        sniffer: &mut SignatureSniffer,
-    ) {
+    pub fn sniff_response(&self, response: &GeminiResponseBody, sniffer: &mut SignatureSniffer) {
         let adapter = GeminiResponseAdapter(response);
         sniffer.inspect(&adapter);
     }
@@ -105,7 +88,8 @@ mod tests {
         }))
         .expect("response json must parse");
 
-        service.record_response(&response);
+        let mut sniffer = service.build_sniffer();
+        service.sniff_response(&response, &mut sniffer);
 
         let mut req: GeminiGenerateContentRequest = serde_json::from_value(json!({
             "contents": [
@@ -157,7 +141,8 @@ mod tests {
         }))
         .expect("response json must parse");
 
-        service.record_response(&response);
+        let mut sniffer = service.build_sniffer();
+        service.sniff_response(&response, &mut sniffer);
 
         let mut req: GeminiGenerateContentRequest = serde_json::from_value(json!({
             "contents": [
@@ -187,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_record_then_patch_hits_cache_without_role_in_chunk() {
+    fn stream_chunks_with_shared_sniffer_hit_cache() {
         let service = GeminiThoughtSigService::new();
         let chunk_without_signature: GeminiResponseBody = serde_json::from_value(json!({
             "candidates": [
@@ -225,9 +210,9 @@ mod tests {
         }))
         .expect("chunk with signature must parse");
 
-        let mut stream_sniffer = service.new_stream_sniffer();
-        service.record_stream_chunk(&mut stream_sniffer, &chunk_without_signature);
-        service.record_stream_chunk(&mut stream_sniffer, &chunk_with_signature);
+        let mut sniffer = service.build_sniffer();
+        service.sniff_response(&chunk_without_signature, &mut sniffer);
+        service.sniff_response(&chunk_with_signature, &mut sniffer);
 
         let mut req: GeminiGenerateContentRequest = serde_json::from_value(json!({
             "contents": [

@@ -75,6 +75,16 @@ pub struct Part {
     pub extra: BTreeMap<String, Value>,
 }
 
+impl Part {
+    /// Mutable access to thought signature.
+    ///
+    /// Keep call sites decoupled from direct field access so schema-level
+    /// representation can evolve without touching every consumer.
+    pub fn thought_signature_mut(&mut self) -> &mut Option<String> {
+        &mut self.thought_signature
+    }
+}
+
 fn deserialize_parts<'de, D>(deserializer: D) -> Result<Vec<Part>, D::Error>
 where
     D: serde::Deserializer<'de>,

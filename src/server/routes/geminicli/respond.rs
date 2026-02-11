@@ -22,10 +22,11 @@ pub async fn build_json_response(
 ) -> Result<(StatusCode, Json<GeminiResponseBody>), GeminiCliError> {
     let status = upstream_resp.status();
     let response_body = transform_nostream(upstream_resp).await?;
+    let mut sniffer = state.providers.geminicli_thoughtsig.build_sniffer();
     state
         .providers
         .geminicli_thoughtsig
-        .record_response(&response_body);
+        .sniff_response(&response_body, &mut sniffer);
     Ok((status, Json(response_body)))
 }
 
@@ -34,9 +35,9 @@ pub fn build_stream_response(
     upstream_resp: reqwest::Response,
     state: PolluxState,
 ) -> impl IntoResponse {
-    let stream_sniffer = state.providers.geminicli_thoughtsig.new_stream_sniffer();
+    let sniffer = state.providers.geminicli_thoughtsig.build_sniffer();
     let raw_stream = upstream_resp.bytes_stream().eventsource();
-    let record_stream = transform_stream(raw_stream, state.clone(), stream_sniffer);
+    let record_stream = transform_stream(raw_stream, state.clone(), sniffer);
     let timed_stream = record_stream
         .timeout(Duration::from_secs(60))
         .map(move |item| match item {
@@ -57,13 +58,11 @@ pub fn build_stream_response(
 fn transform_stream<I, E>(
     s: I,
     state: PolluxState,
-    stream_sniffer: pollux_thoughtsig_core::SignatureSniffer,
+    mut sniffer: pollux_thoughtsig_core::SignatureSniffer,
 ) -> impl Stream<Item = Result<Event, E>>
 where
     I: Stream<Item = Result<eventsource_stream::Event, E>>,
 {
-    let mut stream_sniffer = stream_sniffer;
-
     s.try_filter_map(move |upstream_event| {
         let state = state.clone();
 
@@ -80,7 +79,7 @@ where
                 state
                     .providers
                     .geminicli_thoughtsig
-                    .record_stream_chunk(&mut stream_sniffer, &gemini_resp);
+                    .sniff_response(&gemini_resp, &mut sniffer);
 
                 match Event::default().json_data(gemini_resp) {
                     Ok(ev) => Ok(Some(ev)),

@@ -24,21 +24,16 @@ impl ThoughtSignatureEngine {
         }
     }
 
-    pub fn get(&self, key: &CacheKey) -> Option<ThoughtSignature> {
+    pub fn get_signature(&self, key: &CacheKey) -> Option<ThoughtSignature> {
         self.cache.get(key)
     }
 
-    pub fn put(&self, key: CacheKey, signature: ThoughtSignature) {
+    pub fn put_signature(&self, key: CacheKey, signature: ThoughtSignature) {
         self.cache.insert(key, signature);
     }
 
-    pub fn default_signature(&self) -> ThoughtSignature {
+    pub fn fallback_signature(&self) -> ThoughtSignature {
         self.dummy_signature.clone()
-    }
-
-    pub fn get_signature(&self, key_input: &CacheKey) -> ThoughtSignature {
-        self.get(key_input)
-            .unwrap_or_else(|| self.default_signature())
     }
 }
 
@@ -47,21 +42,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_signature_uses_dummy_when_no_cache() {
+    fn get_signature_returns_none_when_no_cache() {
         let engine = ThoughtSignatureEngine::new(3600, 1024);
         let key = 42_u64;
 
         let signature = engine.get_signature(&key);
-        assert_eq!(signature, engine.dummy_signature);
+        assert!(signature.is_none());
     }
 
     #[test]
     fn get_signature_hits_cache_when_present() {
         let engine = ThoughtSignatureEngine::new(3600, 1024);
         let key = 7_u64;
-        engine.put(key, Arc::from("sig_007"));
+        engine.put_signature(key, Arc::from("sig_007"));
 
         let signature = engine.get_signature(&key);
-        assert_eq!(signature.as_ref(), "sig_007");
+        assert_eq!(signature.as_deref(), Some("sig_007"));
     }
 }
