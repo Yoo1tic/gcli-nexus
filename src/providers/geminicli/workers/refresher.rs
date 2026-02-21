@@ -23,28 +23,82 @@ use tokio::time::sleep;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info, warn};
 
-#[derive(Debug)]
-pub(in crate::providers::geminicli) enum RefreshOutcome {
-    RefreshCredential {
-        id: CredentialId,
-        cred: GeminiCliResource,
-        result: Result<(), PolluxError>,
-    },
-    OnboardCredential {
-        cred: GeminiCliResource,
-        result: Result<(), PolluxError>,
-    },
+#[derive(Clone, Debug)]
+pub(in crate::providers::geminicli) struct RefreshJob {
+    pub cred: GeminiCliResource,
+    pub r#type: TaskType,
 }
 
-#[derive(Debug)]
+impl RefreshJob {
+    async fn execute(mut self, client: reqwest::Client) -> Result<RefreshJob, RefrshError> {
+        match self.r#type {
+            TaskType::Refresh(_) => {
+                if let Err(e) =
+                    refresh_inner(client, *OAUTH_RETRY_POLICY, &mut self.cred, false).await
+                {
+                    return Err(RefrshError {
+                        inner: self,
+                        error: e,
+                    });
+                }
+            }
+            TaskType::Onboard => {
+                if (self.cred.access_token().is_none()
+                    || self.cred.is_expired()
+                    || self.cred.sub().is_empty())
+                    && let Err(e) =
+                        refresh_inner(client.clone(), *OAUTH_RETRY_POLICY, &mut self.cred, true)
+                            .await
+                {
+                    return Err(RefrshError {
+                        inner: self,
+                        error: e,
+                    });
+                }
+
+                if self.cred.sub().is_empty() {
+                    return Err(RefrshError {
+                        inner: self,
+                        error: PolluxError::UnexpectedError(
+                            "Missing sub in id_token claims".into(),
+                        ),
+                    });
+                }
+
+                let token_str = self.cred.access_token().unwrap();
+                match ensure_companion_project(token_str, client).await {
+                    Ok(project_id) => {
+                        self.cred.set_project_id(project_id);
+                    }
+                    Err(e) => {
+                        return Err(RefrshError {
+                            inner: self,
+                            error: e,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(self)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum TaskType {
+    Refresh(CredentialId),
+    Onboard,
+}
+
+pub struct RefrshError {
+    pub inner: RefreshJob,
+    pub error: PolluxError,
+}
+
+pub type RefreshResult = Result<RefreshJob, RefrshError>;
+
 enum GeminiCliRefresherMessage {
-    RefreshCredential {
-        id: CredentialId,
-        cred: GeminiCliResource,
-    },
-    OnboardCredential {
-        cred: GeminiCliResource,
-    },
+    RefreshCredential { job: RefreshJob },
+    OnboardCredential { job: RefreshJob },
 }
 
 /// Handle for submitting refresh requests to the Gemini CLI refresher actor.
@@ -70,80 +124,20 @@ impl GeminiCliRefresherHandle {
         Ok(Self { actor })
     }
 
-    pub fn submit_refresh(
-        &self,
-        id: CredentialId,
-        cred: GeminiCliResource,
-    ) -> Result<(), PolluxError> {
+    pub fn submit_refresh(&self, job: RefreshJob) -> Result<(), PolluxError> {
         ractor::cast!(
             self.actor,
-            GeminiCliRefresherMessage::RefreshCredential { id, cred }
+            GeminiCliRefresherMessage::RefreshCredential { job }
         )
         .map_err(|e| PolluxError::RactorError(format!("GeminiCliRefresherActor cast failed: {e}")))
     }
 
-    pub fn submit_onboard(&self, cred: GeminiCliResource) -> Result<(), PolluxError> {
+    pub fn submit_onboard(&self, job: RefreshJob) -> Result<(), PolluxError> {
         ractor::cast!(
             self.actor,
-            GeminiCliRefresherMessage::OnboardCredential { cred }
+            GeminiCliRefresherMessage::OnboardCredential { job }
         )
         .map_err(|e| PolluxError::RactorError(format!("GeminiCliRefresherActor cast failed: {e}")))
-    }
-}
-
-#[derive(Debug)]
-/// Work items processed by the refresh pipeline.
-enum RefreshTask {
-    RefreshCredential {
-        id: CredentialId,
-        cred: GeminiCliResource,
-    },
-    OnboardCredential {
-        cred: GeminiCliResource,
-    },
-}
-
-impl RefreshTask {
-    pub async fn execute(&mut self, client: reqwest::Client) -> Result<(), PolluxError> {
-        let retry_policy = *OAUTH_RETRY_POLICY;
-
-        match self {
-            Self::RefreshCredential { cred, .. } => {
-                refresh_inner(client, retry_policy, cred, false).await?;
-            }
-
-            Self::OnboardCredential { cred } => {
-                // Onboard path ensures we have a valid access token, then resolves/creates the
-                // companion project id (cloudaicompanion_project). This is required for Gemini
-                // CLI API calls and is intentionally resolved inside the actor pipeline so
-                // external endpoints can remain a black box.
-                if cred.access_token().is_none() || cred.is_expired() || cred.sub().is_empty() {
-                    refresh_inner(client.clone(), retry_policy, cred, true).await?;
-                }
-                if cred.sub().is_empty() {
-                    return Err(PolluxError::UnexpectedError(
-                        "Missing sub in id_token claims".to_string(),
-                    ));
-                }
-                let token_str = cred.access_token().ok_or_else(|| {
-                    PolluxError::RactorError("Refresh success but token is None".to_string())
-                })?;
-                let project_id = ensure_companion_project(token_str, client.clone()).await?;
-                cred.set_project_id(project_id);
-            }
-        }
-        Ok(())
-    }
-
-    fn into_outcome(self, result: Result<(), PolluxError>) -> RefreshOutcome {
-        match self {
-            RefreshTask::RefreshCredential { id, cred } => {
-                RefreshOutcome::RefreshCredential { id, cred, result }
-            }
-            RefreshTask::OnboardCredential { cred } => {
-                RefreshOutcome::OnboardCredential { cred, result }
-            }
-        }
     }
 }
 
@@ -240,7 +234,7 @@ async fn perform_onboarding(
 }
 
 struct GeminiCliRefresherActorState {
-    job_tx: mpsc::Sender<RefreshTask>,
+    job_tx: mpsc::Sender<RefreshJob>,
     handle: GeminiCliActorHandle,
 }
 
@@ -289,7 +283,7 @@ impl Actor for GeminiCliRefresherActor {
                 .allow_burst(std::num::NonZeroU32::new(burst_u32).unwrap()),
         ));
 
-        let (job_tx, job_rx) = mpsc::channel::<RefreshTask>(1000);
+        let (job_tx, job_rx) = mpsc::channel::<RefreshJob>(1000);
         let pipeline_handle = handle.clone();
 
         // Spawn background refresh worker using buffer_unordered semantics.
@@ -301,14 +295,12 @@ impl Actor for GeminiCliRefresherActor {
             );
 
             let mut pipeline = ReceiverStream::new(job_rx)
-                .map(|mut task| {
+                .map(|task| {
                     let lim = limiter.clone();
                     let http = client.clone();
                     async move {
                         lim.until_ready().await;
-
-                        let result = task.execute(http).await;
-                        task.into_outcome(result)
+                        task.execute(http).await
                     }
                 })
                 .buffer_unordered(buffer_unordered);
@@ -339,38 +331,42 @@ impl Actor for GeminiCliRefresherActor {
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         match message {
-            GeminiCliRefresherMessage::RefreshCredential { id, cred } => {
+            GeminiCliRefresherMessage::RefreshCredential { job } => {
                 let tx = state.job_tx.clone();
                 let handle = state.handle.clone();
-                let task = RefreshTask::RefreshCredential { id, cred };
                 tokio::spawn(async move {
-                    if let Err(e) = tx.send(task).await {
-                        warn!("Failed to submit refresh job (channel closed/full): {}", e);
-                        let outcome = e.0.into_outcome(Err(PolluxError::RactorError(
-                            "Refresh job queue is closed".to_string(),
-                        )));
-                        if let Err(e) = handle.send_refresh_complete(outcome) {
+                    if let Err(e) = tx.send(job.clone()).await {
+                        warn!("Failed to submit refresh job: {}", e);
+                        let result = RefreshResult::Err(RefrshError {
+                            inner: job,
+                            error: PolluxError::RactorError(
+                                "Refresh job queue is closed".to_string(),
+                            ),
+                        });
+                        if let Err(e) = handle.send_refresh_complete(result) {
                             warn!(
-                                "Actor unreachable (channel closed), dropping refresh outcome: {}",
+                                "Main Actor unreachable (channel closed), dropping refresh result: {}",
                                 e
                             );
                         }
                     }
                 });
             }
-            GeminiCliRefresherMessage::OnboardCredential { cred } => {
+            GeminiCliRefresherMessage::OnboardCredential { job } => {
                 let tx = state.job_tx.clone();
                 let handle = state.handle.clone();
-                let task = RefreshTask::OnboardCredential { cred };
                 tokio::spawn(async move {
-                    if let Err(e) = tx.send(task).await {
+                    if let Err(e) = tx.send(job.clone()).await {
                         warn!("Failed to submit refresh job (channel closed/full): {}", e);
-                        let outcome = e.0.into_outcome(Err(PolluxError::RactorError(
-                            "Refresh job queue is closed".to_string(),
-                        )));
-                        if let Err(e) = handle.send_refresh_complete(outcome) {
+                        let result = RefreshResult::Err(RefrshError {
+                            inner: job,
+                            error: PolluxError::RactorError(
+                                "Refresh job queue is closed".to_string(),
+                            ),
+                        });
+                        if let Err(e) = handle.send_refresh_complete(result) {
                             warn!(
-                                "Actor unreachable (channel closed), dropping refresh outcome: {}",
+                                "Actor unreachable (channel closed), dropping refresh result: {}",
                                 e
                             );
                         }
