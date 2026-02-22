@@ -375,7 +375,7 @@ impl GeminiCliErrorBody {
                         detail.get("reason").and_then(Value::as_str)
                             == Some("MODEL_CAPACITY_EXHAUSTED")
                     })
-                    .then_some(60 * 60)
+                    .then_some(10 * 60)
             })
     }
 }
