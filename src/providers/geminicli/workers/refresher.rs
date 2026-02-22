@@ -65,7 +65,13 @@ impl RefreshJob {
                     });
                 }
 
-                let token_str = self.cred.access_token().unwrap();
+                let Some(token_str) = self.cred.access_token() else {
+                    return Err(RefreshError {
+                        original_job: self,
+                        error: PolluxError::MissingAccessToken,
+                    });
+                };
+
                 match ensure_companion_project(token_str, client).await {
                     Ok(project_id) => {
                         self.cred.set_project_id(project_id);
