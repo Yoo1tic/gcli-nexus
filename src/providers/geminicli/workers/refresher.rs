@@ -30,14 +30,14 @@ pub(in crate::providers::geminicli) struct RefreshJob {
 }
 
 impl RefreshJob {
-    async fn execute(mut self, client: reqwest::Client) -> Result<RefreshJob, RefrshError> {
+    async fn execute(mut self, client: reqwest::Client) -> Result<RefreshJob, RefreshError> {
         match self.r#type {
             TaskType::Refresh(_) => {
                 if let Err(e) =
                     refresh_inner(client, *OAUTH_RETRY_POLICY, &mut self.cred, false).await
                 {
-                    return Err(RefrshError {
-                        inner: self,
+                    return Err(RefreshError {
+                        original_job: self,
                         error: e,
                     });
                 }
@@ -50,15 +50,15 @@ impl RefreshJob {
                         refresh_inner(client.clone(), *OAUTH_RETRY_POLICY, &mut self.cred, true)
                             .await
                 {
-                    return Err(RefrshError {
-                        inner: self,
+                    return Err(RefreshError {
+                        original_job: self,
                         error: e,
                     });
                 }
 
                 if self.cred.sub().is_empty() {
-                    return Err(RefrshError {
-                        inner: self,
+                    return Err(RefreshError {
+                        original_job: self,
                         error: PolluxError::UnexpectedError(
                             "Missing sub in id_token claims".into(),
                         ),
@@ -71,8 +71,8 @@ impl RefreshJob {
                         self.cred.set_project_id(project_id);
                     }
                     Err(e) => {
-                        return Err(RefrshError {
-                            inner: self,
+                        return Err(RefreshError {
+                            original_job: self,
                             error: e,
                         });
                     }
@@ -89,12 +89,21 @@ pub enum TaskType {
     Onboard,
 }
 
-pub struct RefrshError {
-    pub inner: RefreshJob,
+impl TaskType {
+    pub fn credential_id(&self) -> Option<CredentialId> {
+        match self {
+            TaskType::Refresh(id) => Some(*id),
+            TaskType::Onboard => None,
+        }
+    }
+}
+
+pub struct RefreshError {
+    pub original_job: RefreshJob,
     pub error: PolluxError,
 }
 
-pub type RefreshResult = Result<RefreshJob, RefrshError>;
+pub type RefreshResult = Result<RefreshJob, RefreshError>;
 
 enum GeminiCliRefresherMessage {
     RefreshCredential { job: RefreshJob },
@@ -337,8 +346,8 @@ impl Actor for GeminiCliRefresherActor {
                 tokio::spawn(async move {
                     if let Err(e) = tx.send(job.clone()).await {
                         warn!("Failed to submit refresh job: {}", e);
-                        let result = RefreshResult::Err(RefrshError {
-                            inner: job,
+                        let result = RefreshResult::Err(RefreshError {
+                            original_job: job,
                             error: PolluxError::RactorError(
                                 "Refresh job queue is closed".to_string(),
                             ),
@@ -358,8 +367,8 @@ impl Actor for GeminiCliRefresherActor {
                 tokio::spawn(async move {
                     if let Err(e) = tx.send(job.clone()).await {
                         warn!("Failed to submit refresh job (channel closed/full): {}", e);
-                        let result = RefreshResult::Err(RefrshError {
-                            inner: job,
+                        let result = RefreshResult::Err(RefreshError {
+                            original_job: job,
                             error: PolluxError::RactorError(
                                 "Refresh job queue is closed".to_string(),
                             ),

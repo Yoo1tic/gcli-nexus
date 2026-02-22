@@ -10,7 +10,7 @@ use crate::providers::geminicli::client::oauth::endpoints::GoogleTokenResponse;
 use crate::providers::geminicli::client::oauth::utils::attach_email_from_id_token;
 use crate::providers::geminicli::resource::GeminiCliResource;
 use crate::providers::geminicli::workers::{
-    GeminiCliRefresherHandle, RefreshJob, RefreshResult, RefrshError, TaskType,
+    GeminiCliRefresherHandle, RefreshError, RefreshJob, RefreshResult, TaskType,
 };
 use crate::providers::geminicli::{SUPPORTED_MODEL_MASK, SUPPORTED_MODEL_NAMES};
 use crate::providers::manifest::{GeminiCliLease, GeminiCliProfile};
@@ -417,8 +417,8 @@ impl GeminiCliActor {
                 warn!("ID: {id} Batch refresh enqueue failed. Rolling back.");
 
                 let _ = myself.cast(GeminiCliActorMessage::RefreshComplete {
-                    result: Err(RefrshError {
-                        inner: task,
+                    result: Err(RefreshError {
+                        original_job: task,
                         error: PolluxError::RactorError(format!(
                             "Failed to enqueue refresh job: {e}"
                         )),
@@ -553,17 +553,25 @@ impl GeminiCliActor {
         state: &mut GeminiCliActorState,
         result: RefreshResult,
     ) {
+        // If the result is for a refresh task, check if the credential is still in refreshing state.
+        if let Some(id) = match &result {
+            Ok(success) => &success.r#type,
+            Err(failed) => &failed.original_job.r#type,
+        }
+        .credential_id()
+            && !state.manager.is_refreshing(id)
+        {
+            debug!("ID: {id} Refresh completed/failed after removal; skipping.");
+            return;
+        }
+
+        // Process the refresh result: if success, update credential and re-enqueue; if failure, decide based on error type.
         match result {
             Ok(success) => {
                 let pid = success.cred.project_id().to_string();
                 let cred = success.cred;
                 match success.r#type {
                     TaskType::Refresh(id) => {
-                        if !state.manager.is_refreshing(id) {
-                            debug!("ID: {id} Refresh completed after removal; skipping.");
-                            return;
-                        }
-                        debug!("ID: {id} Refresh success. Updating manager and persisting.");
                         state
                             .manager
                             .add_credential(id, cred.clone(), state.model_caps_all);
@@ -604,39 +612,33 @@ impl GeminiCliActor {
                 }
             }
             Err(failed) => {
-                let job = failed.inner;
+                let job = failed.original_job;
                 let err = failed.error;
                 let pid = job.cred.project_id().to_string();
                 warn!("RefreshTask failed for project {}: {}", pid, err);
                 match job.r#type {
-                    TaskType::Refresh(id) => {
-                        if !state.manager.is_refreshing(id) {
-                            debug!("ID: {id} Refresh failed after removal; skipping.");
-                            return;
-                        }
-                        match err {
-                            PolluxError::Oauth(OauthError::ServerResponse { .. }) => {
-                                error!("ID: {id} Refresh failed: {}. Removing.", err);
+                    TaskType::Refresh(id) => match err {
+                        PolluxError::Oauth(OauthError::ServerResponse { .. }) => {
+                            error!("ID: {id} Refresh failed: {}. Removing.", err);
 
-                                state.manager.delete_credential(id);
-                                let ops = state.ops.clone();
-                                tokio::spawn(async move {
-                                    if let Err(e) = ops.set_status(id, false).await {
-                                        warn!("ID: {id} DB set_status failed: {}", e);
-                                    }
-                                });
-                            }
-                            _ => {
-                                warn!(
-                                    "ID: {id} Refresh failed due to transient error: {}. Keeping credential.",
-                                    err
-                                );
-                                state
-                                    .manager
-                                    .add_credential(id, job.cred, state.model_caps_all);
-                            }
+                            state.manager.delete_credential(id);
+                            let ops = state.ops.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = ops.set_status(id, false).await {
+                                    warn!("ID: {id} DB set_status failed: {}", e);
+                                }
+                            });
                         }
-                    }
+                        _ => {
+                            warn!(
+                                "ID: {id} Refresh failed due to transient error: {}. Keeping credential.",
+                                err
+                            );
+                            state
+                                .manager
+                                .add_credential(id, job.cred, state.model_caps_all);
+                        }
+                    },
                     TaskType::Onboard => {
                         warn!(
                             "Project: {} Onboard failed: {}. Discarding.",
